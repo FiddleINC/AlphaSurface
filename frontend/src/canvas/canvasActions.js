@@ -26,8 +26,8 @@ export const VALID_ACTIONS = new Set([
   "undo", "redo",
   // New organize and freehand
   "draw_freehand", "ink_tidy", "stack_shapes", "rotate_shapes", "bring_to_front", "send_to_back", "set_viewport",
-  // Internal / audio
-  "audio_response", "ai_interrupted", "ai_status",
+  // Internal
+  "ai_status", "voice_result",
   "canvas_snapshot", "config_ack", "user_transcript", "ai_reply",
 ])
 
@@ -44,7 +44,6 @@ export function validateCanvasAction(message) {
     "move_shape", "place_shape", "update_shape", "select_shapes",
     "align_shapes", "distribute_shapes", "resize_shape",
     "create_frame", "group_shapes", "label_shape",
-    "audio_response",
     // New
     "draw_freehand",
     "stack_shapes", "rotate_shapes", "bring_to_front", "send_to_back", "set_viewport",
@@ -161,7 +160,7 @@ function animateText(editor, id, full) {
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
-export function handleCanvasMessage(editor, message, audioCallbacks) {
+export function handleCanvasMessage(editor, message) {
   if (!editor) return
   const validation = validateCanvasAction(message)
   if (!validation.valid) {
@@ -537,15 +536,6 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
       editor.redo()
       break
 
-    // ── Audio (delegated to AudioPlayback) ───────────────────────────────────
-
-    case "audio_response":
-      if (audioCallbacks?.onAudio) audioCallbacks.onAudio(p.data)
-      break
-
-    case "ai_interrupted":
-      if (audioCallbacks?.onInterrupt) audioCallbacks.onInterrupt()
-      break
 
     // ── Internal (handled upstream, ignored here) ─────────────────────────────
 
