@@ -38,6 +38,7 @@ from sub_agents import find_empty_note_position
 from dispatcher import run_dispatcher, register_handler
 from agent_tasks import dispatch
 from memory import memory_store
+from ink.api import InkCoordinator, create_ink_router
 
 _dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path=_dotenv_path)
@@ -58,8 +59,8 @@ CANVAS_PASSTHROUGH_TYPES = {
     "create_frame", "group_shapes", "label_shape",
     # New organize tools
     "stack_shapes", "rotate_shapes", "bring_to_front", "send_to_back", "set_viewport",
-    # Freehand
-    "draw_freehand",
+    # Freehand + ink
+    "draw_freehand", "ink_tidy",
     # Images and cards
     "add_image",
     "add_research_card", "add_provocation_card", "focus_artifact",
@@ -152,6 +153,7 @@ agent = AlphaSurfaceAgent(
 
 bus = get_event_bus()
 persona_agent = get_persona_agent()
+ink_coordinator = InkCoordinator(lambda: agent)
 
 
 @asynccontextmanager
@@ -356,6 +358,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(create_ink_router(ink_coordinator))
 
 # Serve generated images at /static/images/{filename}
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -367,6 +370,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://localhost:4173",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
@@ -579,6 +583,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "config_ack",
                     "payload": {"mode": mode, "webSearch": web_search}
                 }))
+
+            # ── Whiteboard "Ask AI" on a selection of ink/shapes ──────────
+            elif msg_type == "ink_ask":
+                await agent.ensure_session()
+                await agent.wait_ready(8.0)
+                sent = ink_coordinator.ask(payload)
+                if not sent:
+                    await websocket.send_text(json.dumps({
+                        "type": "ai_status",
+                        "payload": {"status": "disconnected", "detail": "AI session not ready"},
+                    }))
 
             # ── Canvas action passthrough (agent → all clients) ───────────
             elif msg_type in CANVAS_PASSTHROUGH_TYPES:

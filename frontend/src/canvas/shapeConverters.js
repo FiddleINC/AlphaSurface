@@ -155,6 +155,9 @@ export function convertToFocusedShape(editor, shape) {
         _type: "draw",
         color: shape.props?.color ?? "black",
         fill: shape.props?.fill ?? "none",
+        // Recognized handwriting (stored on the cluster's lead stroke)
+        ...(shape.meta?.ink?.lead ? { text: shape.meta.ink.text ?? "", inkIntent: shape.meta.ink.intent } : {}),
+        ...(shape.meta?.ink?.clusterId ? { inkCluster: shape.meta.ink.clusterId } : {}),
       }
 
     case "line":

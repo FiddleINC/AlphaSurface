@@ -31,9 +31,10 @@ export default function App() {
 
   return (
     <div style={{ position: "fixed", inset: 0 }}>
+      {/* tldraw reads its license from VITE_TLDRAW_LICENSE_KEY (see README).
+          Without one it runs unlicensed on localhost for development. */}
       <Tldraw
         persistenceKey="alphasurface"
-        licenseKey="tldraw-2026-06-21/WyIxVGRUUjl0diIsWyIqIl0sMTYsIjIwMjYtMDYtMjEiXQ.C8bp6SdPUOFAStZunx2d1YuoGxlZnIn0WJzKwXRDeuUmDaO9/YFeN2ax/30/QFJd4nXPOVDfpkzvMUXJIAIU+A"
         forceMobile
         components={{ MainMenu: AlphaMainMenu }}
       >

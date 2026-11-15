@@ -3,6 +3,7 @@
 // Includes original AlphaSurface actions + precision actions from tldraw template.
 
 import { createShapeId, toRichText, AssetRecordType, b64Vecs } from "tldraw"
+import { tidyInk } from "../ink/inkTidy"
 
 // ── Valid action types ────────────────────────────────────────────────────────
 export const VALID_ACTIONS = new Set([
@@ -25,7 +26,7 @@ export const VALID_ACTIONS = new Set([
   "create_frame",
   "undo", "redo",
   // New organize and freehand
-  "draw_freehand", "stack_shapes", "rotate_shapes", "bring_to_front", "send_to_back", "set_viewport",
+  "draw_freehand", "ink_tidy", "stack_shapes", "rotate_shapes", "bring_to_front", "send_to_back", "set_viewport",
   // Internal / audio
   "audio_response", "ai_interrupted", "ai_status",
   "canvas_snapshot", "config_ack", "task_dashboard",
@@ -117,6 +118,54 @@ function createSemanticCard(editor, { id, x, y, w, h, title, body, color, semant
   })
 }
 
+// ── AI ink animation helpers ─────────────────────────────────────────────────
+
+function densifyPoints(points, closed) {
+  const pts = points.map(pt => ({ x: Number(pt.x) || 0, y: Number(pt.y) || 0 }))
+  const out = []
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1]
+    out.push(a)
+    const steps = Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 8)
+    for (let j = 1; j < steps; j++) {
+      const t = j / steps
+      out.push({ x: Math.round(a.x + (b.x - a.x) * t), y: Math.round(a.y + (b.y - a.y) * t) })
+    }
+  }
+  out.push(pts[pts.length - 1])
+  if (closed) out.push(pts[0])
+  return out
+}
+
+/** Calls step(fraction 0→1) each frame; stop early if step returns false. */
+function animateFrames(durationMs, step) {
+  const start = performance.now()
+  const frame = (now) => {
+    const f = Math.min(1, (now - start) / durationMs)
+    const ease = 1 - Math.pow(1 - f, 2)
+    if (step(f >= 1 ? 1 : ease) === false || f >= 1) return
+    requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
+}
+
+/** Reveal handwritten text character by character, like it is being written. */
+function animateText(editor, id, full) {
+  const duration = Math.min(1400, 180 + full.length * 35)
+  let shown = 1
+  animateFrames(duration, (f) => {
+    const shape = editor.getShape(id)
+    if (!shape) return false
+    const n = Math.max(1, Math.ceil(full.length * f))
+    if (n === shown) return true
+    shown = n
+    editor.run(() => {
+      editor.updateShape({ id, type: "text", props: { richText: toRichText(full.slice(0, n)) } })
+    }, { history: "ignore" })
+    return true
+  })
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 export function handleCanvasMessage(editor, message, audioCallbacks) {
   if (!editor) return
@@ -132,14 +181,22 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
 
     // ── Create actions ──────────────────────────────────────────────────────
 
-    case "add_text":
+    case "add_text": {
+      const id = resolveShapeId(p.id)
+      const font = ["draw", "sans", "serif", "mono"].includes(p.font) ? p.font : "draw"
+      const full = String(p.text ?? "")
       editor.createShape({
-        id: resolveShapeId(p.id),
+        id,
         type: "text", x: p.x ?? 200, y: p.y ?? 200,
-        props: { richText: toRichText(p.text), size: p.size ?? "m", color: normalizeTlColor(p.color, "black") },
+        props: {
+          richText: toRichText(p.animate ? full.slice(0, 1) : full),
+          size: p.size ?? "m", font, color: normalizeTlColor(p.color, "black"),
+        },
         meta: toShapeMeta(p.meta, "text"),
       })
+      if (p.animate && full.length > 1) animateText(editor, id, full)
       break
+    }
 
     case "add_note":
       editor.createShape({
@@ -200,8 +257,8 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
           arrowheadEnd: "arrow", arrowheadStart: "none",
         },
       })
-      editor.createBinding({ type: "arrow", fromId: arrowId, toId: p.fromShapeId, props: { terminal: "start", normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false } })
-      editor.createBinding({ type: "arrow", fromId: arrowId, toId: p.toShapeId, props: { terminal: "end", normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false } })
+      editor.createBinding({ type: "arrow", fromId: arrowId, toId: p.fromShapeId, props: { terminal: "start", normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false, snap: "none" } })
+      editor.createBinding({ type: "arrow", fromId: arrowId, toId: p.toShapeId, props: { terminal: "end", normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false, snap: "none" } })
       break
     }
 
@@ -263,49 +320,52 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
     }
 
     case "draw_freehand": {
-      if (!p.points || p.points.length < 2) break
-      const minX = Math.min(...p.points.map(pt => pt.x))
-      const minY = Math.min(...p.points.map(pt => pt.y))
-      const interpolated = []
-      for (let i = 0; i < p.points.length - 1; i++) {
-        const curr = p.points[i]
-        const next = p.points[i + 1]
-        interpolated.push(curr)
-        const dist = Math.sqrt((next.x - curr.x) ** 2 + (next.y - curr.y) ** 2)
-        const steps = Math.floor(dist / 8)
-        for (let j = 1; j < steps; j++) {
-          const t = j / steps
-          interpolated.push({
-            x: Math.round(curr.x + (next.x - curr.x) * t),
-            y: Math.round(curr.y + (next.y - curr.y) * t),
-          })
-        }
-      }
-      interpolated.push(p.points[p.points.length - 1])
-      if (p.closed && interpolated.length > 0) interpolated.push(interpolated[0])
-      const segPoints = interpolated.map(pt => ({
-        x: pt.x - minX, y: pt.y - minY, z: 0.75,
-      }))
-      const encoded = b64Vecs.encodePoints(segPoints)
-      const shapeId = p.id || createShapeId()
-      editor.createShape({
-        id: shapeId,
-        type: "draw",
-        x: minX,
-        y: minY,
-        props: {
-          color: p.color || "black",
-          fill: "none",
-          dash: "draw",
-          size: "s",
-          segments: [{ type: "free", path: encoded }],
-          isComplete: true,
-          isClosed: !!p.closed,
-          isPen: false,
-        },
+      if (!Array.isArray(p.points) || p.points.length < 2) break
+      const points = densifyPoints(p.points, p.closed)
+      const minX = Math.min(...points.map(pt => pt.x))
+      const minY = Math.min(...points.map(pt => pt.y))
+      // Simulated pen pressure: taper in, press through the middle, lift out.
+      const segPoints = points.map((pt, i) => {
+        const t = points.length > 1 ? i / (points.length - 1) : 0
+        const z = 0.35 + 0.4 * Math.sin(Math.PI * Math.min(1, t * 1.15))
+        return { x: pt.x - minX, y: pt.y - minY, z: Math.round(z * 100) / 100 }
       })
+      const id = resolveShapeId(p.id)
+      const props = (pts, done) => ({
+        color: normalizeTlColor(p.color, "black"),
+        fill: "none",
+        dash: "draw",
+        size: ["s", "m", "l", "xl"].includes(p.size) ? p.size : "s",
+        segments: [{ type: "free", path: b64Vecs.encodePoints(pts) }],
+        isComplete: done,
+        isClosed: !!p.closed && done,
+        isPen: true,
+      })
+      const animate = !!p.animate && segPoints.length > 3
+      editor.createShape({
+        id, type: "draw", x: minX, y: minY,
+        props: props(animate ? segPoints.slice(0, 2) : segPoints, !animate),
+        meta: toShapeMeta(p.meta, "ink"),
+      })
+      if (animate) {
+        const duration = Math.min(900, 220 + segPoints.length * 6)
+        animateFrames(duration, (f) => {
+          const shape = editor.getShape(id)
+          if (!shape) return false
+          const n = Math.max(2, Math.ceil(segPoints.length * f))
+          editor.run(() => {
+            editor.updateShape({ id, type: "draw", props: props(segPoints.slice(0, n), f >= 1) })
+          }, { history: "ignore" })
+          return true
+        })
+      }
       break
     }
+
+    case "ink_tidy":
+      tidyInk(editor, p.scope === "selection" ? "selection" : "viewport")
+        .catch(err => console.warn("[AlphaSurface] Tidy failed", err))
+      break
 
     // ── Precision move (anchor-aware, from tldraw template) ─────────────────
     // Unlike the old move_shape which just set x/y, this correctly accounts for

@@ -18,6 +18,7 @@ from .basic_write import (
     undo_last_action, redo_last_action,
 )
 from .pen_draw import draw_freehand
+from .ink_annotate import ink_mark, ink_connect, ink_write, tidy_ink
 from .agent_state import think, todo_update, schedule_review
 from .dispatch import (
     dispatch_research, dispatch_image_gen, dispatch_youtube,
@@ -58,8 +59,9 @@ ALL_TOOLS = [
     # Navigate
     zoom_to_fit,
 
-    # Freehand
+    # Freehand + AI ink
     draw_freehand,
+    ink_mark, ink_connect, ink_write, tidy_ink,
 
     # Dispatch
     dispatch_research, dispatch_image_gen, dispatch_youtube,

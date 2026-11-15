@@ -16,6 +16,72 @@ Built for the [Gemini Live Agent Challenge](https://geminiliveagentchallenge.dev
 
 ---
 
+## ✍️ Whiteboard Edition: pencil, finger & AI ink
+
+This fork adapts AlphaSurface into a **handwriting-first AI whiteboard**. Write and sketch with an Apple Pencil, S Pen or other stylus, or just your finger, and the AI reads your ink and answers in ink.
+
+| Feature | What it does |
+|---|---|
+| **Pencil + finger input** | Opens in the pen tool. Once a stylus is detected, *Pencil only* mode turns on (palm rejection): the pencil draws, **one finger pans**, two fingers pinch-zoom, a **two-finger tap undoes** and a three-finger tap redoes. Without a stylus, your finger draws. |
+| **Reads handwriting & sketches** | When you pause, nearby strokes are grouped and sent to Gemini, which recognizes text, math, shapes, arrows and doodles. The live agent sees each group as one `ink` shape with its transcription. Select ink to see what the AI read ("Reads: …"). |
+| **Tidy** | Turns rough ink into clean typed text (same size and position), neat shapes with their labels, and arrows bound to those shapes. Doodles stay as ink. One undo restores your strokes. Also works by voice ("tidy this up"). |
+| **AI draws back in ink** | The agent annotates like a person with a pen: `ink_mark` (circle, underline, check, cross, star, bracket, ?), `ink_connect` (hand-drawn arrows) and `ink_write` (handwritten margin replies). AI ink is violet and animates in stroke by stroke. |
+| **Auto-answer** | Handwrite a question or an unfinished problem (`12 × 8 =`, `why does this fail?`) and the AI writes the answer next to it. Toggle with the 💡 button. |
+| **Ask AI** | Select anything and tap **?**. The AI gets an image of the selection plus the recognized text, and responds next to it. |
+| **Installable PWA** | Add to Home Screen on iPad and Android, or install from desktop Chrome/Edge. It runs full-screen and the canvas opens offline (AI features need the network). |
+
+All existing features (voice, research, YouTube, images, documents, Super Think) keep working.
+
+### Ink dock (right edge)
+
+| Button | Action |
+|---|---|
+| ✎ / ✋ | Pencil only on (finger pans) / off (finger draws) |
+| ✦ | Tidy the selected ink, or all ink on screen |
+| ? | Ask AI about the selection, or about the screen |
+| 💡 | Auto-answer handwritten questions on/off |
+
+### How it fits together
+
+```
+pen strokes ──(pause 1.4s)──► cluster nearby strokes ──► render PNG of the cluster
+      │                                                        │
+      │                                       POST /api/ink/recognize (Gemini Flash,
+      │                                       structured output: text/math/shape/arrow/doodle)
+      ▼                                                        │
+lead stroke meta.ink = {text, intent, elements, bounds} ◄───────┘
+      │                         │                              └─ question? → nudges the live agent
+      ▼                         ▼
+ canvas snapshot: "ink"     Tidy: elements → text / geo / arrow shapes
+      │
+      ▼
+ live agent ──► ink_mark / ink_connect / ink_write ──► animated violet pen strokes
+```
+
+### Using it on a tablet
+
+1. Run the backend and frontend as described below. The Vite dev server listens on your LAN (`host: true`).
+2. Browsers only allow the microphone over HTTPS (or on `localhost`). To test voice on a tablet, put the frontend behind an HTTPS tunnel or deploy it. Ink features work over plain LAN HTTP.
+3. Open the URL in Safari or Chrome and choose **Share → Add to Home Screen**.
+
+### tldraw license
+
+The upstream repo hard-coded a tldraw evaluation key that expired on 2026-06-21. With it, tldraw hides the editor 5 seconds after load. The key has been removed. tldraw runs unlicensed on `localhost`. **For any deployed URL, set a key from [tldraw.dev](https://tldraw.dev):**
+
+```env
+# frontend/.env
+VITE_TLDRAW_LICENSE_KEY=your_tldraw_license_key
+```
+
+### Extra environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ALPHASURFACE_MODEL_INK` | `ALPHASURFACE_MODEL_FAST` | Model for handwriting and sketch recognition |
+| `VITE_TLDRAW_LICENSE_KEY` (frontend) | none | tldraw license; required for production domains |
+
+---
+
 ## Features
 
 - **No chat box, no prompt field:** Interact by drawing and speaking — the AI responds spatially on the canvas.
@@ -413,8 +479,13 @@ AlphaSurface/
 │   │   ├── spatial_read.py     # get_viewport_context, get_canvas_map...
 │   │   ├── semantic.py         # label_shape, get_semantic_graph
 │   │   ├── pen_draw.py         # draw_freehand
+│   │   ├── ink_annotate.py     # ink_mark, ink_connect, ink_write, tidy_ink (AI ink)
 │   │   ├── dispatch.py         # dispatch_research, dispatch_youtube...
 │   │   └── state.py            # Shared canvas state
+│   ├── ink/
+│   │   ├── recognizer.py       # Gemini handwriting/sketch recognition (structured output)
+│   │   ├── geometry.py         # Hand-drawn marks, connectors, target resolution
+│   │   └── api.py              # POST /api/ink/recognize, Ask AI, auto-answer
 │   └── sub_agents/
 │       ├── research_agent.py
 │       ├── image_gen_agent.py
@@ -432,10 +503,18 @@ AlphaSurface/
 │   │   │   ├── canvasActions.js         # All tldraw shape operations
 │   │   │   ├── canvasSnapshot.js        # Three-tier spatial context builder
 │   │   │   └── shapeConverters.js       # BlurryShape / FocusedShape / Clusters
+│   │   ├── ink/
+│   │   │   ├── inkModel.js              # Stroke clustering, fingerprints, helpers
+│   │   │   ├── inkRecognition.js        # Pause detection → /api/ink/recognize
+│   │   │   ├── inkTidy.js               # Ink → clean text / shapes / arrows
+│   │   │   ├── penInput.js              # Palm rejection, finger pan, tap undo
+│   │   │   └── inkStore.js              # Ink UI state + preferences
 │   │   └── components/
+│   │       ├── InkToolbar.jsx           # Pencil / Tidy / Ask AI / Auto-answer dock
 │   │       ├── OnboardingFlow.jsx
 │   │       ├── StatusPill.jsx
 │   │       └── AlphaMainMenu.jsx
+│   ├── public/                          # PWA manifest, service worker, icons
 │   └── vite.config.js
 └── README.md
 ```

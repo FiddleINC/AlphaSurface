@@ -19,6 +19,9 @@ import {
 import { handleCanvasMessage } from "../canvas/canvasActions"
 import { sendCanvasSnapshot } from "../canvas/canvasSnapshot"
 import { StatusPill } from "../components/StatusPill"
+import { InkToolbar } from "../components/InkToolbar"
+import { startInkRecognition } from "../ink/inkRecognition"
+import { startPenInput } from "../ink/penInput"
 
 
 export function AlphaSurfaceInner({ config }) {
@@ -133,6 +136,20 @@ export function AlphaSurfaceInner({ config }) {
     connect()
     return () => { disposed = true; clearTimeout(retryTimeout); socket?.close() }
   }, [editor])
+
+  // ── Pencil / finger input + handwriting recognition ───────────────────────
+  useEffect(() => {
+    if (!editor) return
+    if (import.meta.env.DEV) window.__alphaEditor = editor // debugging / e2e hook
+    const stopPen = startPenInput(editor)
+    const stopInk = startInkRecognition(editor)
+    return () => { stopPen(); stopInk() }
+  }, [editor])
+
+  const sendMessage = (msg) => {
+    const socket = wsRef.current
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg))
+  }
 
   // ── Three-tier canvas snapshot → backend ──────────────────────────────────
   // Replaces the old flat shape list with BlurryShapes / FocusedShapes / PeripheralClusters
@@ -309,6 +326,8 @@ export function AlphaSurfaceInner({ config }) {
           background: "linear-gradient(90deg, #8b5cf6, #06b6d4)",
         }} />
       )}
+
+      <InkToolbar sendMessage={sendMessage} aiConnected={aiStatus !== "disconnected"} />
 
       <StatusPill
         aiStatus={aiStatus}

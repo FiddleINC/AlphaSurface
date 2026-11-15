@@ -10,6 +10,40 @@ import {
   convertToFocusedShape,
   convertToPeripheralClusters,
 } from "./shapeConverters"
+import { getRecognizedClusters, getBounds, isUserInk } from "../ink/inkModel"
+
+/**
+ * Replace each recognized handwriting cluster with one "ink" entry that
+ * carries the transcription and the bounds of the whole cluster, so the
+ * agent sees "ink: 'x^2 = 9'" instead of dozens of anonymous strokes.
+ */
+function collapseInk(editor, blurryShapes) {
+  const clusters = getRecognizedClusters(editor)
+  if (clusters.size === 0) return blurryShapes
+  const memberToCluster = new Map()
+  for (const [cid, c] of clusters) for (const s of c.shapes) memberToCluster.set(s.id, cid)
+
+  const out = []
+  const emitted = new Set()
+  for (const b of blurryShapes) {
+    const cid = memberToCluster.get(`shape:${b.shapeId}`)
+    if (!cid) { out.push(b); continue }
+    if (emitted.has(cid)) continue
+    emitted.add(cid)
+    const c = clusters.get(cid)
+    const box = getBounds(editor, c.shapes)
+    const ink = c.lead.meta.ink
+    out.push({
+      shapeId: c.lead.id.slice(6),
+      type: "ink",
+      x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h),
+      text: ink.text || (ink.summary ? `[sketch] ${ink.summary}` : ""),
+      intent: ink.intent,
+      strokes: c.shapes.length,
+    })
+  }
+  return out
+}
 
 /**
  * Build and send the three-tier canvas snapshot over WebSocket.
@@ -44,9 +78,11 @@ export function sendCanvasSnapshot(editor, ws) {
     )
   })
 
-  const blurryShapes = shapesInViewport
-    .map(shape => convertToBlurryShape(editor, shape))
-    .filter(Boolean)
+  const blurryShapes = collapseInk(
+    editor,
+    shapesInViewport.map(shape => convertToBlurryShape(editor, shape)).filter(Boolean),
+  )
+  const unreadInk = shapesInViewport.filter(s => isUserInk(s) && !s.meta?.ink?.clusterId).length
 
   // ── TIER 2: Focused shapes (selected shapes, full detail) ─────────────────
   const selectedShapes = allShapes.filter(s => selectedIds.has(s.id))
@@ -96,6 +132,7 @@ export function sendCanvasSnapshot(editor, ws) {
       currentPageName: currentPage.name,
       pages,
       shape_count: allShapes.length,
+      unreadInkStrokes: unreadInk,
 
       // Viewport
       viewport: {

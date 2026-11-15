@@ -169,6 +169,30 @@ class AlphaSurfaceAgent:
             return
         self._live_queue.send_content(content=types.Content(role="user", parts=parts))
 
+    async def wait_ready(self, timeout: float = 8.0) -> bool:
+        """Wait until the live session can accept turns."""
+        try:
+            await asyncio.wait_for(self._ready.wait(), timeout)
+            return self.running
+        except asyncio.TimeoutError:
+            return False
+
+    def send_user_turn(self, text: str, image_bytes: bytes | None = None, mime: str = "image/png") -> bool:
+        """Push a text (and optional image) turn into the live session.
+
+        Used by the whiteboard ink features ("Ask AI" button, handwritten
+        questions). Returns False when no live session is ready.
+        """
+        if not self.running or not self._ready.is_set() or not self._live_queue:
+            return False
+        parts: list[types.Part] = []
+        if image_bytes:
+            parts.append(types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime)))
+        parts.append(types.Part(text=text))
+        self._last_tool_call_time = time.monotonic()  # suppress overlapping proactive triggers
+        self._send_content(parts)
+        return True
+
     async def _emit(self, msg_type: str, payload: dict):
         enriched = {**payload, "ts": time.time()}
         await self.broadcast_fn({"type": msg_type, "payload": enriched})
