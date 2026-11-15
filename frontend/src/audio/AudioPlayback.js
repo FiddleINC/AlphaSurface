@@ -1,5 +1,5 @@
 // ── Audio playback singleton ──────────────────────────────────────────────────
-// Extracted from App.jsx — handles queued PCM audio playback from Gemini
+// Extracted from App.jsx — handles queued 24 kHz PCM16 speech from the backend (OpenAI TTS)
 
 const _playback = {
   _ctx: null,
@@ -39,7 +39,7 @@ export function isPlaybackEnabled() {
 }
 
 /**
- * Play a base64-encoded PCM chunk from Gemini.
+ * Play a base64-encoded 24 kHz PCM16 chunk.
  * Chunks are queued so they play seamlessly one after another.
  */
 export function playAudioChunk(base64Data) {

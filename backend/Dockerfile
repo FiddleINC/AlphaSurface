@@ -4,7 +4,7 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies needed for PyMuPDF, Pillow, etc.
+# Build tools for any dependency without a prebuilt wheel
 RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \

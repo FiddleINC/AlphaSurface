@@ -1,0 +1,20 @@
+{
+  "name": "AlphaSurface Whiteboard",
+  "short_name": "AlphaSurface",
+  "description": "An AI whiteboard you write on with a pencil or your finger. The AI reads your handwriting and draws back.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#0b0b10",
+  "theme_color": "#0b0b10",
+  "categories": ["productivity", "education"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

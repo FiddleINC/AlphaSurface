@@ -1,6 +1,6 @@
 // ── Shape converters — three-tier canvas context system ──────────────────────
 // Adapted from tldraw agent-template shared/format/
-// Gives Gemini spatially intelligent canvas understanding:
+// Gives the AI spatially intelligent canvas understanding:
 //   BlurryShape      — shapes in viewport (lightweight: id, type, bounds, text)
 //   FocusedShape     — selected/context shapes (full detail: color, fill, etc.)
 //   PeripheralCluster — shapes outside viewport (grouped by proximity)
@@ -155,6 +155,9 @@ export function convertToFocusedShape(editor, shape) {
         _type: "draw",
         color: shape.props?.color ?? "black",
         fill: shape.props?.fill ?? "none",
+        // Recognized handwriting (stored on the cluster's lead stroke)
+        ...(shape.meta?.ink?.lead ? { text: shape.meta.ink.text ?? "", inkIntent: shape.meta.ink.intent } : {}),
+        ...(shape.meta?.ink?.clusterId ? { inkCluster: shape.meta.ink.clusterId } : {}),
       }
 
     case "line":

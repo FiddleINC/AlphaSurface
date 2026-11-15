@@ -2,6 +2,9 @@ import math
 from .state import canvas_state
 
 def get_viewport_context() -> dict:
+    """
+    What is visible on screen right now: viewport bounds, zoom and every visible shape (id, type, position, size, text). Recognized handwriting appears as type "ink" with its transcription in text. Call this first when you need shape ids.
+    """
     vp = canvas_state["viewport"]
     shapes = canvas_state["shapes"]
 
@@ -247,6 +250,9 @@ def get_arrow_connections(shape_id: str) -> dict:
 
 
 def find_shape_by_text(query: str) -> dict:
+    """
+    Find shapes whose text (typed or recognized handwriting) contains `query`. Returns matching shape ids with positions.
+    """
     query_lower = query.lower().strip()
     matches = []
 
@@ -275,6 +281,9 @@ def find_shape_by_text(query: str) -> dict:
 
 
 def get_selected_shapes() -> dict:
+    """
+    The shapes the user currently has selected, with ids, positions and text.
+    """
     selected_ids = set(canvas_state.get("selected_shape_ids", []))
     if not selected_ids:
         return {"selected": [], "count": 0, "message": "No shapes currently selected"}

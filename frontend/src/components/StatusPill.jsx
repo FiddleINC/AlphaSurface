@@ -1,5 +1,5 @@
 // ── StatusPill ────────────────────────────────────────────────────────────────
-// Top-center floating pill showing AI status, mode, and mic state.
+// Top-center floating pill showing AI status, mic and speaker state.
 // Clicking it toggles mute.
 
 const STATUS = {
@@ -60,10 +60,6 @@ export function StatusPill({ aiStatus, listening, muted, speakerMuted, config, o
 
         {/* Mode/web/mic section */}
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px" }}>
-          <span style={{ color: "rgba(255,255,255,0.48)", textTransform: "capitalize" }}>{config.mode}</span>
-          {config.webSearch && (
-            <span style={{ color: "#60a5fa", fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", padding: "1px 5px", borderRadius: 4, background: "rgba(96,165,250,0.1)" }}>WEB</span>
-          )}
           <button
             onClick={onToggleMute}
             title={muted ? "Click to unmute mic" : "Click to mute mic"}

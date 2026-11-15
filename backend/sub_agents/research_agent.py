@@ -7,7 +7,7 @@ Triggered by:
 
 Flow:
   1. Receives {query: str} payload from dispatcher
-  2. Runs ADK Agent with google_search tool to get real results
+  2. Claude searches the web (web_search tool) and submits a structured result
   3. Returns structured JSON (Pydantic model): title + bullets + sources
   4. Places a clean cluster on canvas:
        [Title geo] ──→ [Bullet note] x3-5
@@ -19,21 +19,14 @@ All shapes placed relative to current viewport center.
 """
 
 import asyncio
-import os
 import random
 import uuid
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from google.adk.agents import Agent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
-from google.genai import types
-
-from event_bus import get_event_bus
-from model_config import FAST_MODEL
+from brain.claude import get_client, request_defaults
+from model_config import CLAUDE_MODEL, CLAUDE_RESEARCH_EFFORT
 from sub_agents import emit_failure_note
 from tools.state import canvas_state
 
@@ -42,7 +35,7 @@ from tools.state import canvas_state
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-_MODEL = FAST_MODEL
+_MODEL = CLAUDE_MODEL
 
 _SYSTEM_PROMPT = """\
 You are a research assistant. Your job is to search the web for information on a query
@@ -53,7 +46,8 @@ Rules:
 - Each bullet must be a concrete fact or finding, not a vague statement
 - Keep each bullet compact enough to fit on a canvas card; target 1 to 2 short sentences
 - Prefer recent information
-- ALWAYS use the google_search tool to find accurate information. DO NOT guess.
+- ALWAYS use the web_search tool to find accurate information. DO NOT guess.
+- When done, call submit_research exactly once with your findings.
 - Keep each bullet under 220 characters.
 """
 
@@ -220,97 +214,61 @@ async def _place_cluster(broadcast_fn, title: str, bullets: list[str],
 
 # ── Core research logic ───────────────────────────────────────────────────────
 
+_SUBMIT_TOOL = {
+    "name": "submit_research",
+    "description": "Submit the final research result for placement on the canvas. Call exactly once, after searching.",
+    "input_schema": {
+        **ResearchResult.model_json_schema(),
+        "additionalProperties": False,
+    },
+}
+_WEB_SEARCH = {"type": "web_search_20260209", "name": "web_search", "max_uses": 4}
+
+
+async def _research(query: str) -> dict | None:
+    """Claude searches the web, then calls submit_research with the result."""
+    messages: list = [{"role": "user", "content": f"Research this topic: {query}"}]
+    client = get_client()
+    for _ in range(6):
+        response = await client.beta.messages.create(
+            **request_defaults(_MODEL, CLAUDE_RESEARCH_EFFORT),
+            max_tokens=16000,
+            system=_SYSTEM_PROMPT,
+            tools=[_WEB_SEARCH, _SUBMIT_TOOL],
+            messages=messages,
+        )
+        for block in response.content:
+            if getattr(block, "type", "") == "tool_use" and block.name == "submit_research":
+                return dict(block.input)
+        messages.append({"role": "assistant", "content": response.content})
+        if response.stop_reason == "pause_turn":
+            continue  # long server-side search: let it continue
+        if response.stop_reason == "refusal":
+            return None
+        messages.append({"role": "user", "content": "Now call submit_research with your findings."})
+    return None
+
+
 async def run_research(payload: dict, broadcast_fn) -> None:
-    """
-    Main handler. Called by dispatcher with payload = {"query": str}.
-    """
+    """Dispatcher handler. payload = {"query": str}."""
     query = payload.get("query", "").strip()
     if not query:
-        print("[ResearchAgent] Empty query — skipping")
         return
-
     print(f"[ResearchAgent] Researching: {query}")
-
     try:
-        # ADK Agents cannot use both tools and output_schema directly.
-        # We use a SequentialAgent pipeline: fetch -> format
-        from google.adk.agents import SequentialAgent
-        
-        research_fetcher = Agent(
-            name="research_fetcher",
-            model=_MODEL,
-            instruction=_SYSTEM_PROMPT,
-            tools=[google_search],
-            output_key="raw_research",
-            generate_content_config=types.GenerateContentConfig(temperature=0.2),
-        )
-
-        research_formatter = Agent(
-            name="research_formatter",
-            model=_MODEL,
-            instruction="Format this research into the structured schema: {raw_research}",
-            output_schema=ResearchResult,
-            output_key="research_result",
-            disallow_transfer_to_parent=True,
-            disallow_transfer_to_peers=True,
-            generate_content_config=types.GenerateContentConfig(temperature=0),
-        )
-
-        research_agent = SequentialAgent(
-            name="research_pipeline",
-            sub_agents=[research_fetcher, research_formatter]
-        )
-
-        session_service = InMemorySessionService()
-        await session_service.create_session(
-            app_name="alphasurface", user_id="user", session_id="research_session"
-        )
-        
-        runner = Runner(
-            agent=research_agent,
-            app_name="alphasurface",
-            session_service=session_service,
-        )
-
-        message = types.Content(
-            role="user", parts=[types.Part.from_text(text=f"Research this topic: {query}")]
-        )
-
-        final_state = None
-        async for event in runner.run_async(
-            user_id="user", session_id="research_session", new_message=message
-        ):
-            if event.is_final_response():
-                pass
-
-        session = await session_service.get_session(
-            app_name="alphasurface", user_id="user", session_id="research_session"
-        )
-        if not session or "research_result" not in session.state:
-            print("[ResearchAgent] Failed to retrieve valid schema response.")
+        result = await _research(query)
+        if not result:
+            await emit_failure_note(broadcast_fn, "ResearchAgent", "no result")
             return
-            
-        result: dict = session.state["research_result"]
-
-        title = result.get("title", query[:40])
+        title = result.get("title") or query[:40]
         long_form = result.get("format", "short") == "long"
         max_bullets = _MAX_BULLETS_LONG if long_form else _MAX_BULLETS_SHORT
-        bullets = [_compact_text(b) for b in (result.get("bullets", []) or [])[:max_bullets] if isinstance(b, str)]
-        source_url = result.get("source_url")
-        source_label = result.get("source_label")
-
+        bullets = [_compact_text(b) for b in (result.get("bullets") or [])[:max_bullets] if isinstance(b, str)]
         if not bullets:
-            print("[ResearchAgent] No bullets returned — skipping canvas placement")
             return
-
-        await _place_cluster(broadcast_fn, title, bullets, source_url, source_label, long_form=long_form)
-
+        await _place_cluster(
+            broadcast_fn, title, bullets, result.get("source_url"), result.get("source_label"), long_form=long_form
+        )
     except Exception as e:
-        print(f"[ResearchAgent] Error: {e}")
-        msg = str(e)
-        is_rate_limited = "429" in msg or "RESOURCE_EXHAUSTED" in msg
-        if not is_rate_limited:
-            import traceback
-            traceback.print_exc()
+        print(f"[ResearchAgent] Error: {e!r}")
         await emit_failure_note(broadcast_fn, "ResearchAgent", e)
-

@@ -1,7 +1,7 @@
 // ── AlphaMainMenu ─────────────────────────────────────────────────────────────
-// Custom tldraw main menu with Save / Load / Export PDF / Upload Document
+// Custom tldraw main menu with Save / Load / Export PDF
 
-import { useEditor, toRichText, createShapeId, getSnapshot, loadSnapshot, DefaultMainMenu, DefaultMainMenuContent, TldrawUiMenuGroup, TldrawUiMenuItem } from "tldraw"
+import { useEditor, getSnapshot, loadSnapshot, DefaultMainMenu, DefaultMainMenuContent, TldrawUiMenuGroup, TldrawUiMenuItem } from "tldraw"
 import { jsPDF } from "jspdf"
 
 export function AlphaMainMenu() {
@@ -116,37 +116,12 @@ export function AlphaMainMenu() {
     }
   }
 
-  const handleUploadDoc = () => {
-    const input = Object.assign(document.createElement("input"), { type: "file", accept: ".pdf,.doc,.docx,.txt" })
-    input.onchange = async (e) => {
-      const file = e.target.files?.[0]
-      if (!file) return
-      const formData = new FormData()
-      formData.append("file", file)
-      try {
-        const res = await fetch("/api/upload", { method: "POST", body: formData })
-        const data = await res.json()
-        if (data.status === "success") {
-          const vp = editor.getViewportPageBounds()
-          editor.createShape({
-            id: createShapeId(), type: "note",
-            x: (vp?.x ?? 0) + Math.max(40, (vp?.w ?? 1000) * 0.25),
-            y: (vp?.y ?? 0) + Math.max(40, (vp?.h ?? 700) * 0.2),
-            props: { richText: toRichText(`📄 ${file.name}`), color: "blue", size: "m" },
-          })
-        }
-      } catch (err) { console.error("Upload failed", err) }
-    }
-    input.click()
-  }
-
   return (
     <DefaultMainMenu>
       <TldrawUiMenuGroup id="alphasurface-file-actions">
         <TldrawUiMenuItem id="alphasurface-save" label="Save canvas" readonlyOk onSelect={handleSave} />
         <TldrawUiMenuItem id="alphasurface-load" label="Load canvas" readonlyOk onSelect={handleLoad} />
         <TldrawUiMenuItem id="alphasurface-export-pdf" label="Export PDF" readonlyOk onSelect={handleExportPdf} />
-        <TldrawUiMenuItem id="alphasurface-upload-doc" label="Upload document" readonlyOk onSelect={handleUploadDoc} />
       </TldrawUiMenuGroup>
       <DefaultMainMenuContent />
     </DefaultMainMenu>

@@ -1,5 +1,4 @@
 from .state import canvas_state, canvas_action_queue
-from memory import memory_store
 import uuid
 
 _VALID_GEO = {
@@ -179,18 +178,6 @@ def scan_canvas_text() -> dict:
     }
 
 
-def memory_read(user_id: str) -> dict:
-    store = memory_store()
-    if hasattr(store, "read_sync"):
-        return store.read_sync(user_id)
-    return {}
-
-
-def memory_write(user_id: str, key: str, value: str) -> str:
-    store = memory_store()
-    if hasattr(store, "merge_sync"):
-        store.merge_sync(user_id, {key: value})
-    return f"Memory updated: {key} = {value}"
 
 
 def add_text_to_canvas(
@@ -263,6 +250,13 @@ def add_geo_to_canvas(text: str, geo: str, x: int, y: int,
                       source: str = "live_agent",
                       confidence: float = 0.8,
                       linked_to: str = "") -> str:
+    """
+    Create a geometric shape with a text label at an exact position. Prefer place_near / place_in_empty_space unless you computed coordinates.
+
+    geo: rectangle | ellipse | diamond | triangle | cloud | star | hexagon
+    color: black | blue | green | red | orange | violet | yellow | grey
+    fill: none | semi | solid
+    """
     normalized_geo = _normalize_geo(geo)
     normalized_fill = _normalize_fill(fill)
     normalized_color = _normalize_color(color, "blue")
@@ -296,6 +290,9 @@ def add_arrow_to_canvas(x1: int, y1: int, x2: int, y2: int,
 
 def bind_arrow(from_shape_id: str, to_shape_id: str,
                label: str, color: str) -> str:
+    """
+    Draw a straight arrow that stays attached to two shapes (by shapeId). Use for clean typed diagrams; use ink_connect for hand-drawn arrows.
+    """
     normalized_color = _normalize_color(color, "black")
     canvas_action_queue.put_nowait({
         "type": "bind_arrow",
@@ -304,16 +301,6 @@ def bind_arrow(from_shape_id: str, to_shape_id: str,
     })
     return f"Bound arrow {from_shape_id}→{to_shape_id}"
 
-
-def add_embed_to_canvas(url: str, x: int, y: int, w: int, h: int) -> str:
-    final_w = int(w or 560)
-    final_h = int(h or 315)
-    x, y = _find_non_overlapping_xy(int(x), int(y), final_w, final_h)
-    canvas_action_queue.put_nowait({
-        "type": "add_embed",
-        "payload": {"url": url, "x": x, "y": y, "w": final_w, "h": final_h}
-    })
-    return f"Embedded {url}"
 
 
 def add_bookmark_to_canvas(
@@ -341,6 +328,9 @@ def add_bookmark_to_canvas(
 
 
 def move_shape(shape_id: str, x: int, y: int) -> str:
+    """
+    Move a shape so its top-left corner is at (x, y) in page coordinates.
+    """
     canvas_action_queue.put_nowait({
         "type": "move_shape",
         "payload": {"shapeId": shape_id, "x": x, "y": y}
@@ -349,6 +339,9 @@ def move_shape(shape_id: str, x: int, y: int) -> str:
 
 
 def update_shape(shape_id: str, text: str, color: str) -> str:
+    """
+    Change the text and/or color of an existing shape. Pass an empty string to keep a value unchanged.
+    """
     payload: dict = {"shapeId": shape_id}
     if text:
         payload["text"] = text
@@ -359,6 +352,9 @@ def update_shape(shape_id: str, text: str, color: str) -> str:
 
 
 def delete_shapes(shape_ids: list[str]) -> str:
+    """
+    Delete shapes by id. Never delete the user's own work unless they asked.
+    """
     canvas_action_queue.put_nowait({
         "type": "delete_shapes",
         "payload": {"shapeIds": shape_ids}
