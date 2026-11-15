@@ -4,12 +4,13 @@ AlphaSurface — FastAPI server for the AI whiteboard.
   Browser ──WS──► main.py
      canvas_snapshot  → shared canvas_state (what Claude sees as the board)
      canvas_image     → latest screenshot attached to Claude's next turn
-     audio_chunk      → VoiceSession (OpenAI speech-to-text) → CanvasAgent
+     voice_request    → CanvasAgent (handed over by the OpenAI Realtime voice)
      ink_ask          → CanvasAgent ("Ask AI" on a selection)
   POST /api/ink/recognize → Claude handwriting recognition (+ auto-answer)
+  POST /api/voice/session → short-lived key for the browser's Realtime session
 
   CanvasAgent (Claude) tool calls → canvas_action_queue → broadcast → browser
-  CanvasAgent reply text → VoiceSession (OpenAI text-to-speech) → browser
+  CanvasAgent reply → ai_reply (+ voice_result) → browser, spoken by Realtime
 
 Run:  uv run uvicorn main:app --reload --port 8000
 """
@@ -35,7 +36,8 @@ from dispatcher import register_handler, run_dispatcher  # noqa: E402
 from ink.api import InkCoordinator, create_ink_router  # noqa: E402
 from sub_agents import find_empty_note_position  # noqa: E402
 from tools.snapshot import apply_snapshot  # noqa: E402
-from voice.session import VoiceSession  # noqa: E402
+from model_config import has_openai_credentials  # noqa: E402
+from voice.realtime import create_voice_router  # noqa: E402
 
 connected_clients: list[WebSocket] = []
 
@@ -70,18 +72,16 @@ async def drain_canvas_actions():
             print(f"[App] Broadcast failed: {e}")
 
 
-# ── Claude brain + OpenAI voice ──────────────────────────────────────────────
+# ── Claude brain ─────────────────────────────────────────────────────────────
 
-voice: VoiceSession | None = None
+async def _send_reply(text: str, turn) -> None:
+    """Every reply is captioned; voice turns also resolve the waiting tool call."""
+    await broadcast({"type": "ai_reply", "payload": {"text": text, "source": turn.source}})
+    if turn.reply_id:
+        await broadcast({"type": "voice_result", "payload": {"id": turn.reply_id, "text": text}})
 
 
-async def _speak_reply(text: str) -> None:
-    if voice is not None:
-        await voice.speak(text)
-
-
-agent = CanvasAgent(broadcast=broadcast, on_reply=_speak_reply)
-voice = VoiceSession(broadcast=broadcast, submit=lambda text: agent.submit(text, source="voice"))
+agent = CanvasAgent(broadcast=broadcast, on_reply=_send_reply)
 ink_coordinator = InkCoordinator(lambda: agent)
 
 
@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI):
     )
     tasks = [asyncio.create_task(run_dispatcher()), asyncio.create_task(drain_canvas_actions())]
     print(f"[App] Claude: {'ready' if agent.available else 'missing ANTHROPIC_API_KEY'} · "
-          f"Voice: {'ready' if voice.available else 'off (no OPENAI_API_KEY)'}")
+          f"Voice: {'ready' if has_openai_credentials() else 'off (no OPENAI_API_KEY)'}")
     yield
     await agent.stop()
     for t in tasks:
@@ -120,6 +120,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(create_ink_router(ink_coordinator))
+app.include_router(create_voice_router())
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:4173", "http://localhost:3000"],
@@ -133,7 +134,7 @@ async def health():
     return {
         "status": "ok",
         "claude": agent.available,
-        "voice": voice.available,
+        "voice": has_openai_credentials(),
         "clients": len(connected_clients),
         "canvas_shapes": canvas_tools.canvas_state["shape_count"],
     }
@@ -145,7 +146,7 @@ async def websocket_endpoint(websocket: WebSocket):
     connected_clients.append(websocket)
     await websocket.send_text(json.dumps({"type": "ai_status", "payload": {
         "status": "idle" if agent.available else "disconnected",
-        "voice": voice.available,
+        "voice": has_openai_credentials(),
     }}))
 
     try:
@@ -161,22 +162,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 if payload.get("data"):
                     agent.set_canvas_image(base64.b64decode(payload["data"]), payload.get("mime", "image/jpeg"))
 
-            elif msg_type == "audio_chunk":
-                if payload.get("data"):
-                    voice.push_audio(base64.b64decode(payload["data"]))
-
-            elif msg_type == "set_config":
-                # "Start without voice" turns off both the mic and spoken replies.
-                voice.enabled = voice.speaker_enabled = bool(payload.get("voiceEnabled", True))
-                await websocket.send_text(json.dumps({"type": "config_ack", "payload": {"voice": voice.available}}))
-
-            elif msg_type == "set_audio":
-                voice.enabled = not bool(payload.get("muted", False))
-
-            elif msg_type == "set_speaker":
-                voice.speaker_enabled = not bool(payload.get("muted", False))
-                if not voice.speaker_enabled:
-                    await voice.interrupt()
+            elif msg_type == "voice_request":
+                req_id, text = str(payload.get("id", "")), str(payload.get("request", "")).strip()
+                if not text or not agent.submit(text, source="voice", reply_id=req_id):
+                    await websocket.send_text(json.dumps({"type": "voice_result", "payload": {
+                        "id": req_id, "text": "The whiteboard AI isn't available right now.",
+                    }}))
 
             elif msg_type == "ink_ask":
                 if not ink_coordinator.ask(payload):

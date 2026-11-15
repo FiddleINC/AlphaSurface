@@ -1,12 +1,14 @@
 """
 CanvasAgent — Claude drives the whiteboard.
 
-Turns come from three places: something the user said (voice transcript),
-"Ask AI" on a selection, or a handwritten question (auto-answer). Each turn
+Turns come from three places: a request the voice model hands over
+(OpenAI Realtime, see voice/realtime.py), "Ask AI" on a selection, or a
+handwritten question (auto-answer). Each turn
 sends Claude the latest board screenshot plus a compact JSON summary of the
 visible shapes, then runs a tool loop over the canvas tools. Tool calls
 enqueue canvas actions that main.py broadcasts to the browser; the final
-plain text of the turn is handed to `on_reply` (spoken by the voice layer).
+plain text of the turn is handed to `on_reply(text, turn)` — always, even
+on failure, so a waiting voice tool call is never left hanging.
 
 Turns run one at a time, in order. History is append-only (never edited) so
 prompt caching keeps working; it is reset after MAX_HISTORY_MESSAGES.
@@ -35,7 +37,7 @@ MAX_HISTORY_MESSAGES = 40
 MAX_SUMMARY_SHAPES = 80
 
 BroadcastFn = Callable[[dict], Awaitable[None]]
-ReplyFn = Callable[[str], Awaitable[None]]
+ReplyFn = Callable[[str, "Turn"], Awaitable[None]]
 
 
 @dataclass
@@ -44,6 +46,7 @@ class Turn:
     source: str  # "voice" | "ask" | "auto_answer"
     image: Optional[bytes] = None
     mime: str = "image/png"
+    reply_id: Optional[str] = None  # correlates a voice request with its answer
 
 
 def board_summary(state: dict = canvas_state) -> str:
@@ -71,7 +74,7 @@ def board_summary(state: dict = canvas_state) -> str:
 
 
 _SOURCE_PREFIX = {
-    "voice": "The user said",
+    "voice": "The user asked by voice",
     "ask": "Ask AI",
     "auto_answer": "Handwritten question",
 }
@@ -99,10 +102,13 @@ class CanvasAgent:
     def set_canvas_image(self, image: bytes, mime: str = "image/jpeg") -> None:
         self._latest_image = (image, mime)
 
-    def submit(self, text: str, source: str, image: bytes | None = None, mime: str = "image/png") -> bool:
+    def submit(
+        self, text: str, source: str, image: bytes | None = None, mime: str = "image/png",
+        reply_id: str | None = None,
+    ) -> bool:
         if not self.available:
             return False
-        self._queue.put_nowait(Turn(text=text, source=source, image=image, mime=mime))
+        self._queue.put_nowait(Turn(text=text, source=source, image=image, mime=mime, reply_id=reply_id))
         if self._worker is None or self._worker.done():
             self._worker = asyncio.create_task(self._run())
         return True
@@ -123,25 +129,25 @@ class CanvasAgent:
         while not self._queue.empty():
             turn = await self._queue.get()
             self.busy = True
+            reply, detail = "", ""
             try:
                 await self._status("thinking")
                 reply = await self.run_turn(turn)
-                if reply and self.on_reply:
-                    await self.on_reply(reply)
             except anthropic.RateLimitError:
-                await self._status("idle", "Claude is rate limited, try again shortly")
+                detail = "Claude is rate limited, try again shortly"
             except anthropic.APIConnectionError:
-                await self._status("idle", "Could not reach Claude")
+                detail = "Could not reach Claude"
             except anthropic.APIStatusError as e:
                 print(f"[Agent] Claude error {e.status_code}: {e.message}")
-                await self._status("idle", "Claude request failed")
+                detail = "Claude request failed"
             except Exception as e:
                 print(f"[Agent] Turn failed: {e!r}")
-                await self._status("idle", "AI turn failed")
-            else:
-                await self._status("idle")
+                detail = "AI turn failed"
             finally:
                 self.busy = False
+            await self._status("idle", detail)
+            if self.on_reply and (reply or turn.reply_id):
+                await self.on_reply(reply or (f"Sorry, that didn't work: {detail}." if detail else ""), turn)
 
     def _user_content(self, turn: Turn) -> list:
         content: list = []

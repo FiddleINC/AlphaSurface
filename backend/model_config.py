@@ -22,10 +22,11 @@ CLAUDE_INK_EFFORT = _env("ALPHASURFACE_INK_EFFORT", "low")
 CLAUDE_RESEARCH_EFFORT = _env("ALPHASURFACE_RESEARCH_EFFORT", "medium")
 CLAUDE_SUPER_THINK_EFFORT = _env("ALPHASURFACE_SUPER_THINK_EFFORT", "high")
 
-# ── OpenAI (voice only) ──────────────────────────────────────────────────────
-OPENAI_STT_MODEL = _env("ALPHASURFACE_STT_MODEL", "gpt-4o-transcribe")
-OPENAI_TTS_MODEL = _env("ALPHASURFACE_TTS_MODEL", "gpt-4o-mini-tts")
-OPENAI_TTS_VOICE = _env("ALPHASURFACE_TTS_VOICE", "alloy")
+# ── OpenAI Realtime (voice only) ─────────────────────────────────────────────
+# Speech-to-speech model the browser talks to over WebRTC. It handles the
+# conversation and hands every whiteboard request to Claude.
+OPENAI_REALTIME_MODEL = _env("ALPHASURFACE_REALTIME_MODEL", "gpt-realtime-2.1")
+OPENAI_REALTIME_VOICE = _env("ALPHASURFACE_REALTIME_VOICE", "marin")
 
 
 def has_claude_credentials() -> bool:

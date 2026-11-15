@@ -1,25 +1,18 @@
 // ── App.jsx ───────────────────────────────────────────────────────────────────
-// Root component. Was 1264 lines. Now 50.
-// All logic lives in dedicated modules.
+// Root component: start screen, then the tldraw board.
 
 import { useCallback, useState } from "react"
 import { Tldraw } from "tldraw"
 import "tldraw/tldraw.css"
 
-import { activatePlaybackContext, setPlaybackEnabled } from "./audio/AudioPlayback"
 import { AlphaSurfaceInner } from "./agent/AlphaSurfaceInner"
 import { AlphaMainMenu } from "./components/AlphaMainMenu"
 import { StartScreen } from "./components/StartScreen"
 
 export default function App() {
-  // Shown on every launch: the start tap unlocks audio playback and the mic.
+  // Shown on every launch: the start tap lets the browser open the mic and play voice.
   const [config, setConfig] = useState(null)
-
-  const handleLaunch = useCallback((cfg) => {
-    setPlaybackEnabled(cfg.voiceEnabled)
-    if (cfg.voiceEnabled) activatePlaybackContext()
-    setConfig(cfg)
-  }, [])
+  const handleLaunch = useCallback((cfg) => setConfig(cfg), [])
 
   if (!config) return <StartScreen onStart={handleLaunch} />
 

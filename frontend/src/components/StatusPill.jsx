@@ -10,9 +10,9 @@ const STATUS = {
   disconnected: { label: "Offline",    dot: "#6b7280", pulse: false },
 }
 
-export function StatusPill({ aiStatus, listening, muted, speakerMuted, config, onToggleMute, onToggleSpeaker }) {
+export function StatusPill({ aiStatus, listening, voiceOn, muted, speakerMuted, onToggleMute, onToggleSpeaker }) {
   const status = (
-    aiStatus === "idle" && listening && !muted && config.voiceEnabled
+    aiStatus === "idle" && listening && !muted && voiceOn
       ? STATUS.listening
       : (STATUS[aiStatus] ?? STATUS.disconnected)
   )
@@ -68,7 +68,7 @@ export function StatusPill({ aiStatus, listening, muted, speakerMuted, config, o
               outline: "none", display: "flex", alignItems: "center"
             }}
           >
-            {muted || !config.voiceEnabled ? (
+            {muted || !voiceOn ? (
               <span style={{ color: "#f87171", fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", padding: "1px 5px", borderRadius: 4, background: "rgba(248,113,113,0.12)" }}>MIC OFF</span>
             ) : (
               <span style={{ color: "#34d399", fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", padding: "1px 5px", borderRadius: 4, background: "rgba(52,211,153,0.1)" }}>MIC ON</span>

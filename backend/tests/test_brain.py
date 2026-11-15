@@ -1,9 +1,6 @@
-"""Claude canvas agent, tool schemas, snapshot merge and OpenAI voice — all with fake clients."""
+"""Claude canvas agent, tool schemas, snapshot merge and Realtime voice glue — fake clients only."""
 
 import asyncio
-import base64
-import math
-import struct
 from types import SimpleNamespace
 
 import pytest
@@ -118,7 +115,7 @@ def test_agent_turn_runs_tools_then_returns_spoken_reply(board):
     first = fake.calls[0]
     user = first["messages"][0]["content"]
     assert user[0]["type"] == "image" and user[0]["source"]["media_type"] == "image/jpeg"
-    assert '"text":"12 x 8 ="' in user[1]["text"] and "The user said: what is this?" in user[1]["text"]
+    assert '"text":"12 x 8 ="' in user[1]["text"] and "The user asked by voice: what is this?" in user[1]["text"]
     assert first["model"] == "claude-opus-5-5" and first["fallbacks"] == "default"
     assert first["output_config"] == {"effort": "low"} and first["cache_control"] == {"type": "ephemeral"}
     assert [t["name"] for t in first["tools"]][:4] == [f.__name__ for f in AGENT_TOOLS][:4]
@@ -141,170 +138,99 @@ def test_agent_submit_runs_turns_in_order_and_speaks(board):
     async def bc(msg):
         statuses.append(msg["payload"]["status"])
 
-    async def say(text):
-        spoken.append(text)
+    async def say(text, turn):
+        spoken.append((text, turn.source, turn.reply_id))
 
     async def main():
         agent = CanvasAgent(broadcast=bc, on_reply=say, client=fake)
-        agent.submit("a", "voice")
+        agent.submit("a", "voice", reply_id="r1")
         agent.submit("b", "ask")
         await agent._worker
 
     asyncio.run(main())
-    assert spoken == ["one", "two"]
+    assert spoken == [("one", "voice", "r1"), ("two", "ask", None)]
     assert statuses == ["thinking", "idle", "thinking", "idle"]
 
 
-# ── Voice (OpenAI) ───────────────────────────────────────────────────────────
-
-def _tone(ms, amp=0.3, rate=16000):
-    n = int(rate * ms / 1000)
-    return b"".join(struct.pack("<h", int(amp * 32767 * math.sin(i / 8))) for i in range(n))
 
 
-def _silence(ms, rate=16000):
-    return b"\x00\x00" * int(rate * ms / 1000)
+def test_failed_voice_turn_still_answers_the_waiting_tool_call(board):
+    from brain.canvas_agent import CanvasAgent
 
+    class Broken:
+        def __init__(self):
+            self.beta = SimpleNamespace(messages=self)
 
-def test_segmenter_finds_one_utterance_with_preroll():
-    from voice.segmenter import SpeechStarted, Utterance, UtteranceSegmenter
+        async def create(self, **kw):
+            raise RuntimeError("boom")
 
-    seg = UtteranceSegmenter()
-    events = []
-    for chunk in [_silence(256), _tone(256), _tone(256), _silence(256), _silence(256), _silence(256)]:
-        events += seg.feed(chunk)
-    assert isinstance(events[0], SpeechStarted)
-    utt = [e for e in events if isinstance(e, Utterance)]
-    # 256 ms pre-roll + 512 ms speech + 768 ms trailing silence
-    assert len(utt) == 1 and utt[0].duration_ms == 1536
-
-
-def test_segmenter_ignores_clicks():
-    from voice.segmenter import Utterance, UtteranceSegmenter
-
-    seg = UtteranceSegmenter()
-    events = []
-    for chunk in [_tone(100), _silence(256), _silence(256), _silence(256)]:
-        events += seg.feed(chunk)
-    assert not [e for e in events if isinstance(e, Utterance)]
-
-
-def test_wav_header():
-    from voice.segmenter import pcm16_to_wav
-    wav = pcm16_to_wav(_silence(100))
-    assert wav[:4] == b"RIFF" and wav[8:12] == b"WAVE" and len(wav) == 44 + 3200
-
-
-class FakeOpenAI:
-    def __init__(self, transcript="what is twelve times eight", tts=b"\x01\x02\x03" * 5000):
-        self.transcript = transcript
-        self.tts = tts
-        self.stt_calls = []
-        self.tts_calls = []
-        outer = self
-
-        class Transcriptions:
-            async def create(self, **kw):
-                outer.stt_calls.append(kw)
-                return SimpleNamespace(text=outer.transcript)
-
-        class Resp:
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *a):
-                return False
-
-            async def iter_bytes(self, size):
-                for i in range(0, len(outer.tts), 7001):  # odd sizes on purpose
-                    yield outer.tts[i:i + 7001]
-
-        class Streaming:
-            def create(self, **kw):
-                outer.tts_calls.append(kw)
-                return Resp()
-
-        self.audio = SimpleNamespace(
-            transcriptions=Transcriptions(),
-            speech=SimpleNamespace(with_streaming_response=Streaming()),
-        )
-
-
-def test_voice_utterance_is_transcribed_and_submitted():
-    from voice.session import VoiceSession
-
-    submitted, sent = [], []
-
-    async def bc(msg):
-        sent.append(msg)
-
-    async def main():
-        v = VoiceSession(broadcast=bc, submit=lambda t: submitted.append(t) or True, client=FakeOpenAI())
-        for chunk in [_tone(256), _tone(256), _silence(800)]:
-            v.push_audio(chunk)
-        await asyncio.gather(*list(v._pending))
-        return v
-
-    v = asyncio.run(main())
-    assert submitted == ["what is twelve times eight"]
-    stt = v._client.stt_calls[0]
-    assert stt["model"] == "gpt-4o-transcribe" and stt["file"][2] == "audio/wav"
-    assert {"type": "user_transcript", "payload": {"text": "what is twelve times eight"}} in sent
-
-
-def test_voice_drops_noise_transcripts():
-    from voice.session import VoiceSession
-    submitted = []
+    replies = []
 
     async def bc(msg):
         pass
 
+    async def on_reply(text, turn):
+        replies.append((text, turn.reply_id))
+
     async def main():
-        v = VoiceSession(broadcast=bc, submit=lambda t: submitted.append(t), client=FakeOpenAI(transcript="you"))
-        for chunk in [_tone(256), _tone(256), _silence(800)]:
-            v.push_audio(chunk)
-        await asyncio.gather(*list(v._pending))
+        agent = CanvasAgent(broadcast=bc, on_reply=on_reply, client=Broken())
+        agent.submit("draw a cat", "voice", reply_id="v9")
+        await agent._worker
 
     asyncio.run(main())
-    assert submitted == []
+    assert replies == [("Sorry, that didn't work: AI turn failed.", "v9")]
 
 
-def test_voice_speak_streams_whole_pcm_samples():
-    from voice.session import VoiceSession
+# ── Realtime voice ───────────────────────────────────────────────────────────
+
+def test_voice_session_mints_ephemeral_key_with_model_and_voice():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from voice.realtime import create_voice_router
+
+    calls = []
+
+    class Secrets:
+        async def create(self, **kw):
+            calls.append(kw)
+            return SimpleNamespace(value="ek_test", expires_at=123)
+
+    fake = SimpleNamespace(realtime=SimpleNamespace(client_secrets=Secrets()))
+    app = FastAPI()
+    app.include_router(create_voice_router(client=fake))
+    res = TestClient(app).post("/api/voice/session")
+
+    assert res.status_code == 200
+    assert res.json() == {"key": "ek_test", "model": "gpt-realtime-2.1", "expiresAt": 123}
+    session = calls[0]["session"]
+    assert session["type"] == "realtime" and session["model"] == "gpt-realtime-2.1"
+    assert session["audio"]["output"]["voice"] == "marin"
+    assert calls[0]["expires_after"]["seconds"] <= 600
+
+
+def test_voice_session_needs_openai_key(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from voice.realtime import create_voice_router
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app = FastAPI()
+    app.include_router(create_voice_router())
+    assert TestClient(app).post("/api/voice/session").status_code == 503
+
+
+def test_voice_request_reply_is_routed_back_by_id(monkeypatch):
+    import main
+
     sent = []
 
-    async def bc(msg):
+    async def fake_broadcast(msg):
         sent.append(msg)
 
-    async def main():
-        v = VoiceSession(broadcast=bc, submit=lambda t: True, client=FakeOpenAI())
-        await v.speak("That's 96.")
-        await v._speaking
-        return v
-
-    v = asyncio.run(main())
-    audio = [base64.b64decode(m["payload"]["data"]) for m in sent if m["type"] == "audio_response"]
-    assert audio and all(len(a) % 2 == 0 for a in audio)
-    assert sum(len(a) for a in audio) == 15000
-    assert sent[0] == {"type": "ai_reply", "payload": {"text": "That's 96."}}
-    call = v._client.tts_calls[0]
-    assert call["response_format"] == "pcm" and call["model"] == "gpt-4o-mini-tts" and "instructions" in call
-
-
-def test_voice_barge_in_interrupts_speech():
-    from voice.session import VoiceSession
-    sent = []
-
-    async def bc(msg):
-        sent.append(msg["type"])
-
-    async def main():
-        v = VoiceSession(broadcast=bc, submit=lambda t: True, client=FakeOpenAI())
-        v._speaking = asyncio.create_task(asyncio.sleep(10))
-        v.push_audio(_tone(256))
-        await asyncio.gather(*list(v._pending))
-        await asyncio.sleep(0)
-        return v
-
-    v = asyncio.run(main())
-    assert "ai_interrupted" in sent and v._speaking.cancelled()
+    monkeypatch.setattr(main, "broadcast", fake_broadcast)
+    from brain.canvas_agent import Turn
+    asyncio.run(main._send_reply("It's 96.", Turn(text="x", source="voice", reply_id="abc")))
+    assert sent == [
+        {"type": "ai_reply", "payload": {"text": "It's 96.", "source": "voice"}},
+        {"type": "voice_result", "payload": {"id": "abc", "text": "It's 96."}},
+    ]
