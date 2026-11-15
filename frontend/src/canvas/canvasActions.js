@@ -2,15 +2,14 @@
 // Handles all messages from the Python backend that manipulate the tldraw canvas.
 // Includes original AlphaSurface actions + precision actions from tldraw template.
 
-import { createShapeId, toRichText, AssetRecordType, b64Vecs } from "tldraw"
+import { createShapeId, toRichText, b64Vecs } from "tldraw"
 import { tidyInk } from "../ink/inkTidy"
 
 // ── Valid action types ────────────────────────────────────────────────────────
 export const VALID_ACTIONS = new Set([
   // Create
   "add_text", "add_note", "add_geo", "add_arrow", "bind_arrow",
-  "add_embed", "add_bookmark", "add_image",
-  "add_research_card", "add_provocation_card",
+  "add_bookmark", "add_research_card",
   // Read / navigate
   "focus_artifact", "focus_shape", "zoom_to_fit",
   // Precision actions (from tldraw template)
@@ -29,7 +28,7 @@ export const VALID_ACTIONS = new Set([
   "draw_freehand", "ink_tidy", "stack_shapes", "rotate_shapes", "bring_to_front", "send_to_back", "set_viewport",
   // Internal / audio
   "audio_response", "ai_interrupted", "ai_status",
-  "canvas_snapshot", "config_ack", "task_dashboard",
+  "canvas_snapshot", "config_ack", "user_transcript", "ai_reply",
 ])
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -40,8 +39,7 @@ export function validateCanvasAction(message) {
 
   const needsPayload = new Set([
     "add_text", "add_note", "add_geo", "add_arrow", "bind_arrow",
-    "add_embed", "add_bookmark",
-    "add_research_card", "add_provocation_card",
+    "add_bookmark", "add_research_card",
     "focus_artifact", "delete_shapes", "focus_shape",
     "move_shape", "place_shape", "update_shape", "select_shapes",
     "align_shapes", "distribute_shapes", "resize_shape",
@@ -55,10 +53,6 @@ export function validateCanvasAction(message) {
 
   if (needsPayload.has(message.type) && (!message.payload || typeof message.payload !== "object")) {
     return { valid: false, reason: "missing_payload" }
-  }
-
-  if (message.type === "add_image") {
-    if (!message.id || !message.src) return { valid: false, reason: "missing_add_image_fields" }
   }
 
   return { valid: true }
@@ -262,15 +256,6 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
       break
     }
 
-    case "add_embed":
-      editor.createShape({
-        id: resolveShapeId(p.id),
-        type: "embed", x: p.x ?? 200, y: p.y ?? 200,
-        props: { url: p.url, w: p.w ?? 560, h: p.h ?? 315 },
-        meta: toShapeMeta(p.meta, "embed"),
-      })
-      break
-
     case "add_bookmark":
       editor.createShape({
         id: resolveShapeId(p.id),
@@ -289,32 +274,6 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
         title: p.title ?? "Research", body, color: "light-blue",
         semanticRole: "research_card",
         meta: { ...(p.meta ?? {}), source: p.source ?? "ResearchAgent", confidence: p.confidence ?? 0.75, linked_to: p.linked_to ?? [], addedBy: "ResearchAgent" },
-      })
-      break
-    }
-
-    case "add_provocation_card":
-      createSemanticCard(editor, {
-        id: p.id, x: p.x, y: p.y, w: p.w ?? 360, h: p.h ?? 220,
-        title: "Provocation", body: p.text ?? "", color: "violet",
-        semanticRole: "provocation_card",
-        meta: { ...(p.meta ?? {}), source: p.source ?? "AlphaSurface", confidence: p.confidence ?? 0.7, linked_to: p.linked_to ?? [], addedBy: "AlphaSurface" },
-      })
-      break
-
-    case "add_image": {
-      const { id, x, y, width, height, src, meta } = message
-      const assetId = AssetRecordType.createId()
-      editor.createAssets([{
-        id: assetId, type: "image", typeName: "asset",
-        props: { name: id || "image", src, w: width ?? 480, h: height ?? 480, mimeType: "image/png", isAnimated: false },
-        meta: {},
-      }])
-      editor.createShape({
-        id: resolveShapeId(id), type: "image",
-        x: x ?? 200, y: y ?? 200,
-        props: { w: width ?? 480, h: height ?? 480, assetId },
-        meta: toShapeMeta(meta, "image"),
       })
       break
     }
@@ -593,7 +552,8 @@ export function handleCanvasMessage(editor, message, audioCallbacks) {
     case "ai_status":
     case "canvas_snapshot":
     case "config_ack":
-    case "task_dashboard":
+    case "user_transcript":
+    case "ai_reply":
       break
 
     default:

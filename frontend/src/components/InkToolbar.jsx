@@ -6,13 +6,13 @@
 //   💡 Auto-answer — let the AI answer handwritten questions by itself
 // Plus a chip that shows what the AI read from the selected ink.
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useEditor, useValue } from "tldraw"
 import { Hand, Lightbulb, LightbulbOff, MessageCircleQuestion, PenLine, Sparkles } from "lucide-react"
 
 import { isUserInk } from "../ink/inkModel"
 import { recognizeNow, renderShapes } from "../ink/inkRecognition"
-import { setInkState, useInkState } from "../ink/inkStore"
+import { getInkState, setInkState, useInkState } from "../ink/inkStore"
 import { tidyInk } from "../ink/inkTidy"
 import { setPencilOnly } from "../ink/penInput"
 
@@ -72,6 +72,16 @@ export function InkToolbar({ sendMessage, aiConnected }) {
       .join(" · ")
   }, [editor])
 
+  // Captions (what you said / what the AI answered) fade after a few seconds.
+  useEffect(() => {
+    if (!ink.caption) return
+    const at = ink.captionAt
+    const t = setTimeout(() => {
+      if (getInkState().captionAt === at) setInkState({ caption: "" })
+    }, 7000)
+    return () => clearTimeout(t)
+  }, [ink.caption, ink.captionAt])
+
   const flash = (msg) => {
     setToast(msg)
     setTimeout(() => setToast(t => (t === msg ? "" : t)), 2400)
@@ -125,7 +135,7 @@ export function InkToolbar({ sendMessage, aiConnected }) {
     ink.status === "reading" ? "Reading ink…"
     : ink.status === "tidying" ? "Tidying…"
     : ink.status === "unavailable" || ink.status === "rate_limited" ? ink.lastError
-    : toast || (selectedRead ? `Reads: ${selectedRead}` : "")
+    : toast || ink.caption || (selectedRead ? `Reads: ${selectedRead}` : "")
 
   return (
     <>
@@ -168,9 +178,10 @@ export function InkToolbar({ sendMessage, aiConnected }) {
             ...glass,
             position: "fixed", left: "50%", transform: "translateX(-50%)",
             bottom: "calc(env(safe-area-inset-bottom) + 76px)", zIndex: 9998,
-            maxWidth: "min(560px, calc(100vw - 32px))", padding: "7px 14px", borderRadius: 999,
+            maxWidth: "min(560px, calc(100vw - 32px))", padding: "8px 16px", borderRadius: 18,
             color: "rgba(255,255,255,0.88)", fontSize: 13, fontWeight: 500,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            overflow: "hidden", lineHeight: 1.4, textAlign: "center",
+            display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
             pointerEvents: "none",
           }}
         >

@@ -2,7 +2,7 @@
 HTTP + WebSocket glue for the whiteboard ink features.
 
   POST /api/ink/recognize   rendered ink cluster → recognized elements
-  WS   {"type": "ink_ask"}  "Ask AI" button → turn pushed into the live agent
+  WS   {"type": "ink_ask"}  "Ask AI" button → turn for the Claude canvas agent
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import base64
 import time
 from typing import Any, Callable, Optional
 
+import anthropic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -84,10 +85,9 @@ class InkCoordinator:
         agent = self._get_agent()
         if agent is None:
             return False
-        sent = agent.send_user_turn(
+        sent = agent.submit(
             build_auto_respond_prompt(result["transcript"], result.get("intent", "note"), req.shapeIds),
-            image,
-            req.mime,
+            source="auto_answer", image=image, mime=req.mime,
         )
         if sent:
             self._last_auto_respond = now
@@ -108,7 +108,25 @@ class InkCoordinator:
             str(payload.get("transcript", "")).strip(),
             [str(i) for i in payload.get("shapeIds", []) if i],
         )
-        return agent.send_user_turn(prompt, image, payload.get("mime", "image/png"))
+        return agent.submit(prompt, source="ask", image=image, mime=payload.get("mime", "image/png"))
+
+
+def _note_cluster(req: RecognizeRequest, result: dict) -> None:
+    """Make the recognized cluster visible to Claude before the next snapshot."""
+    from tools.snapshot import note_recognized_cluster
+
+    els = result["elements"]
+    if els:
+        x1 = min(e["x"] for e in els)
+        y1 = min(e["y"] for e in els)
+        x2 = max(e["x"] + e["w"] for e in els)
+        y2 = max(e["y"] + e["h"] for e in els)
+        bounds = {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+    else:
+        r = req.rect
+        bounds = {"x": r.x, "y": r.y, "w": r.w, "h": r.h}
+    text = result["transcript"] or (f"[sketch] {result['summary']}" if result["summary"] else "")
+    note_recognized_cluster(req.shapeIds, bounds, text)
 
 
 def create_ink_router(coordinator: InkCoordinator) -> APIRouter:
@@ -117,7 +135,7 @@ def create_ink_router(coordinator: InkCoordinator) -> APIRouter:
     @router.post("/recognize")
     async def recognize(req: RecognizeRequest):
         if not has_ink_credentials():
-            raise HTTPException(status_code=503, detail="Ink recognition needs GEMINI_API_KEY")
+            raise HTTPException(status_code=503, detail="Ink recognition needs ANTHROPIC_API_KEY")
         try:
             image = base64.b64decode(req.image, validate=False)
         except Exception:
@@ -129,11 +147,14 @@ def create_ink_router(coordinator: InkCoordinator) -> APIRouter:
 
         try:
             recognition = await recognize_ink(image, req.mime, req.context)
-        except Exception as exc:  # model / network errors
-            msg = str(exc)
-            status = 429 if ("429" in msg or "RESOURCE_EXHAUSTED" in msg) else 502
-            print(f"[Ink] Recognition failed: {msg[:300]}")
-            raise HTTPException(status_code=status, detail="Ink recognition failed")
+        except anthropic.RateLimitError:
+            raise HTTPException(status_code=429, detail="Claude is rate limited")
+        except anthropic.APIStatusError as exc:
+            print(f"[Ink] Claude error {exc.status_code}: {exc.message[:300]}")
+            raise HTTPException(status_code=502, detail="Ink recognition failed")
+        except Exception as exc:  # network errors, refusals, malformed output
+            print(f"[Ink] Recognition failed: {exc!r}")
+            raise HTTPException(status_code=502, detail="Ink recognition failed")
 
         result = {
             "elements": to_page_elements(recognition, req.rect),
@@ -142,6 +163,7 @@ def create_ink_router(coordinator: InkCoordinator) -> APIRouter:
             "intent": recognition.intent,
             "asks_ai": bool(recognition.asks_ai),
         }
+        _note_cluster(req, result)
         result["autoResponded"] = coordinator.maybe_auto_respond(result, req, image)
         print(
             f"[Ink] {len(result['elements'])} elements, intent={result['intent']} "

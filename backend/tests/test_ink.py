@@ -51,10 +51,36 @@ def test_to_page_elements_clamps_and_fixes_inverted_boxes():
     assert els[1]["start"]["x"] == 0 and els[1]["end"]["x"] == 1000
 
 
-def test_response_schema_is_accepted_by_genai():
-    from google.genai import types
-    cfg = types.GenerateContentConfig(response_mime_type="application/json", response_schema=InkRecognition)
-    assert cfg.response_schema is InkRecognition
+def test_recognize_ink_uses_claude_structured_output():
+    from types import SimpleNamespace
+    from ink.recognizer import recognize_ink
+
+    calls = {}
+
+    class FakeMessages:
+        async def parse(self, **kw):
+            calls.update(kw)
+            return SimpleNamespace(stop_reason="end_turn", parsed_output=InkRecognition(transcript="hi"))
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=FakeMessages()))
+    out = asyncio.run(recognize_ink(b"png", "image/png", "ctx", client=client))
+    assert out.transcript == "hi"
+    assert calls["output_format"] is InkRecognition
+    assert calls["messages"][0]["content"][0]["type"] == "image"
+    assert calls["fallbacks"] == "default"
+
+
+def test_recognize_ink_raises_on_refusal():
+    from types import SimpleNamespace
+    from ink.recognizer import InkRecognitionRefused, recognize_ink
+
+    class FakeMessages:
+        async def parse(self, **kw):
+            return SimpleNamespace(stop_reason="refusal", parsed_output=None)
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=FakeMessages()))
+    with pytest.raises(InkRecognitionRefused):
+        asyncio.run(recognize_ink(b"png", client=client))
 
 
 # ── Target resolution + geometry ─────────────────────────────────────────────
@@ -167,9 +193,11 @@ def test_tidy_ink_emits_frontend_action(canvas):
 class _FakeAgent:
     def __init__(self):
         self.turns = []
+        self.sources = []
 
-    def send_user_turn(self, text, image=None, mime="image/png"):
+    def submit(self, text, source, image=None, mime="image/png"):
         self.turns.append(text)
+        self.sources.append(source)
         return True
 
 
@@ -212,7 +240,7 @@ def test_recognize_endpoint_returns_page_elements_and_auto_responds(client):
     data = res.json()
     assert data["elements"][0] == {"kind": "math", "text": "12 x 8 =", "x": 10, "y": 20, "w": 300, "h": 100}
     assert data["asks_ai"] is True and data["autoResponded"] is True
-    assert 'near="s1,s2"' in agent.turns[0]
+    assert 'near="s1,s2"' in agent.turns[0] and agent.sources == ["auto_answer"]
 
     # Cooldown: a second question right away does not nudge the agent again.
     res = http.post("/api/ink/recognize", json=_body())
@@ -240,3 +268,17 @@ def test_ask_prompt_mentions_selection():
     agent = _FakeAgent()
     InkCoordinator(lambda: agent).ask({"shapeIds": ["shape:q"], "transcript": "why?", "question": ""})
     assert "[q]" in agent.turns[0] and "why?" in agent.turns[0]
+
+
+def test_recognize_records_cluster_for_claude_before_next_snapshot(client, monkeypatch):
+    from tools import state
+    monkeypatch.setitem(state.canvas_state, "shapes", [
+        {"id": "shape:s1", "type": "draw", "x": 0, "y": 0, "w": 5, "h": 5},
+        {"id": "shape:other", "type": "note", "x": 900, "y": 900, "w": 5, "h": 5},
+    ])
+    http, _ = client
+    http.post("/api/ink/recognize", json=_body())
+    shapes = {s["id"]: s for s in state.canvas_state["shapes"]}
+    assert set(shapes) == {"shape:s1", "shape:other"}
+    assert shapes["shape:s1"]["type"] == "ink" and shapes["shape:s1"]["text"] == "12 x 8 ="
+    assert (shapes["shape:s1"]["x"], shapes["shape:s1"]["w"]) == (10, 300)

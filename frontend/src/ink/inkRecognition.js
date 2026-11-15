@@ -152,7 +152,7 @@ async function runPass(editor, onlyIds = null) {
       })
     } catch (err) {
       if (err.status === 503) {
-        setInkState({ status: "unavailable", pending: 0, lastError: "Add GEMINI_API_KEY to enable ink AI" })
+        setInkState({ status: "unavailable", pending: 0, lastError: "Add ANTHROPIC_API_KEY to enable ink AI" })
         return
       }
       if (err.status === 429) {

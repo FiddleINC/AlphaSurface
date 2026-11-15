@@ -1,6 +1,6 @@
 // ── Shape converters — three-tier canvas context system ──────────────────────
 // Adapted from tldraw agent-template shared/format/
-// Gives Gemini spatially intelligent canvas understanding:
+// Gives the AI spatially intelligent canvas understanding:
 //   BlurryShape      — shapes in viewport (lightweight: id, type, bounds, text)
 //   FocusedShape     — selected/context shapes (full detail: color, fill, etc.)
 //   PeripheralCluster — shapes outside viewport (grouped by proximity)

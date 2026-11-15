@@ -3,10 +3,10 @@ Ink recognizer — turns a rendered image of freehand strokes into structure.
 
 The frontend groups nearby pen/finger strokes into a "cluster", renders that
 cluster to a PNG covering a known page-space rectangle, and POSTs it to
-/api/ink/recognize. We ask Gemini (fast model, structured output) what the
+/api/ink/recognize. Claude (vision + structured output) says what the
 strokes are: handwritten text, math, shapes, arrows, or free doodles.
 
-Gemini returns boxes in its native 0–1000 normalized convention
+Boxes come back normalized to 0–1000 over the image
 ([ymin, xmin, ymax, xmax]); `to_page_elements` maps them back into tldraw page
 coordinates so the frontend can replace the ink with clean shapes (Tidy) and
 the live agent can annotate next to it.
@@ -14,15 +14,12 @@ the live agent can annotate next to it.
 
 from __future__ import annotations
 
-import asyncio
-import os
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from model_config import FAST_MODEL
-
-INK_MODEL = os.environ.get("ALPHASURFACE_MODEL_INK", "").strip() or FAST_MODEL
+from brain.claude import get_client, request_defaults
+from model_config import CLAUDE_INK_EFFORT, CLAUDE_INK_MODEL, has_claude_credentials
 
 ElementKind = Literal["text", "math", "shape", "arrow", "line", "doodle"]
 GeoKind = Literal[
@@ -111,62 +108,46 @@ Return elements in reading order (top-to-bottom, left-to-right).
 """
 
 
-_client = None
-
-
-def _get_client():
-    global _client
-    if _client is None:
-        from google import genai
-
-        _client = genai.Client()
-    return _client
-
-
 def has_ink_credentials() -> bool:
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-        return True
-    return (
-        os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true"
-        and bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
-    )
+    return has_claude_credentials()
+
+
+class InkRecognitionRefused(Exception):
+    pass
 
 
 async def recognize_ink(
     image_bytes: bytes,
     mime: str = "image/png",
     context: str = "",
+    client=None,
 ) -> InkRecognition:
-    """Run Gemini on a rendered ink cluster and return normalized elements."""
-    from google.genai import types
+    """Run Claude on a rendered ink cluster and return normalized elements."""
+    import base64
 
     prompt = "Recognize the handwriting and sketches in this image."
     if context:
         prompt += f"\nNearby canvas context (may help disambiguate): {context[:600]}"
 
-    response = await asyncio.to_thread(
-        _get_client().models.generate_content,
-        model=INK_MODEL,
-        contents=[
-            types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime)),
-            types.Part(text=prompt),
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM,
-            temperature=0,
-            response_mime_type="application/json",
-            response_schema=InkRecognition,
-            # Flash models can skip thinking for latency; Pro models require it.
-            thinking_config=(
-                types.ThinkingConfig(thinking_budget=0) if "flash" in INK_MODEL else None
-            ),
-        ),
+    response = await (client or get_client()).beta.messages.parse(
+        **request_defaults(CLAUDE_INK_MODEL, CLAUDE_INK_EFFORT),
+        max_tokens=8000,
+        system=_SYSTEM,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": mime,
+                    "data": base64.standard_b64encode(image_bytes).decode(),
+                }},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+        output_format=InkRecognition,
     )
-
-    parsed = getattr(response, "parsed", None)
-    if isinstance(parsed, InkRecognition):
-        return parsed
-    return InkRecognition.model_validate_json(response.text or "{}")
+    if response.stop_reason == "refusal" or response.parsed_output is None:
+        raise InkRecognitionRefused(str(response.stop_reason))
+    return response.parsed_output
 
 
 # ── Coordinate mapping ────────────────────────────────────────────────────────

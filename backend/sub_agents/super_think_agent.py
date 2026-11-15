@@ -6,29 +6,27 @@ like "super think", "deep dive", "analyze this", or "think harder".
 
 Flow:
   1. Reads all text from the canvas (via the canvas_state snapshot)
-  2. Sends it to gemini-2.5-pro with extended thinking budget
+  2. Sends it to Claude at high effort
   3. Places 3 tiers of output on canvas:
        - 🟣 Core insight cluster (synthesis of what's on canvas)
        - 🔴 Tensions / contradictions found
        - 🟡 Open questions / white-space (what's missing)
   4. Zoom to fit
 
-Model: gemini-2.5-pro (thinking model — best for deep reasoning)
+Model: Claude (CLAUDE_MODEL, effort ALPHASURFACE_SUPER_THINK_EFFORT)
 """
 
 import asyncio
 import random
 from typing import Optional
 
-from google.genai import Client, types
-import os
-from model_config import THINKING_MODEL
+from brain.claude import get_client, request_defaults, text_of
+from model_config import CLAUDE_MODEL, CLAUDE_SUPER_THINK_EFFORT
 from sub_agents import emit_failure_note
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-_MODEL = THINKING_MODEL
-_THINKING_BUDGET = 8192  # tokens dedicated to internal reasoning
+_MODEL = CLAUDE_MODEL
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,15 +40,6 @@ def _canvas_pos():
     bx = random.randint(-800, -200)
     by = random.randint(-400, 300)
     return bx, by
-
-
-_genai_client: Optional[Client] = None
-
-def _get_client() -> Client:
-    global _genai_client
-    if _genai_client is None:
-        _genai_client = Client(api_key=os.getenv("GEMINI_API_KEY", ""))
-    return _genai_client
 
 
 # ── Deep analysis prompt ──────────────────────────────────────────────────────
@@ -237,24 +226,16 @@ async def run_super_think(payload: dict, broadcast_fn, canvas_state: dict) -> No
     print(f"[SuperThink] Canvas content ({len(canvas_state.get('shapes', []))} shapes):\n{canvas_text[:400]}")
 
     try:
-        client = _get_client()
-
         user_message = f"Here is what's on the canvas:\n\n{canvas_text}"
+        async with get_client().beta.messages.stream(
+            **request_defaults(_MODEL, CLAUDE_SUPER_THINK_EFFORT),
+            max_tokens=32000,
+            system=_SYSTEM,
+            messages=[{"role": "user", "content": user_message}],
+        ) as stream:
+            response = await stream.get_final_message()
 
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=_MODEL,
-            contents=[user_message],
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM,
-                thinking_config=types.ThinkingConfig(
-                    thinking_budget=_THINKING_BUDGET,
-                ),
-                temperature=1.0,  # required for thinking models
-            ),
-        )
-
-        raw_text = response.text.strip()
+        raw_text = text_of(response.content)
         print(f"[SuperThink] Response received ({len(raw_text)} chars)")
 
         sections = _parse_sections(raw_text)

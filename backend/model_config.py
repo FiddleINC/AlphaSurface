@@ -1,3 +1,5 @@
+"""Model + provider settings. Every value can be overridden with an env var."""
+
 import os
 
 
@@ -6,19 +8,29 @@ def _env(name: str, default: str) -> str:
     return value or default
 
 
-# Single place to change model defaults for local development.
-# If an env var is set to a non-empty value, it overrides the default here.
-# If an env var is blank or missing, the default in this file is used.
+# ── Claude (reasoning, canvas actions, handwriting) ──────────────────────────
+# The canvas agent that answers voice, Ask AI and handwritten questions.
+CLAUDE_MODEL = _env("ALPHASURFACE_CLAUDE_MODEL", "claude-opus-5-5")
+# Effort trades depth for latency. "low" keeps spoken replies snappy.
+CLAUDE_AGENT_EFFORT = _env("ALPHASURFACE_AGENT_EFFORT", "low")
 
-# Main live voice+vision agent.
-LIVE_MODEL = _env("ALPHASURFACE_MODEL_LIVE", "gemini-2.5-flash-native-audio-preview-12-2025")
+# Handwriting / sketch recognition (one structured call per ink cluster).
+CLAUDE_INK_MODEL = _env("ALPHASURFACE_INK_MODEL", CLAUDE_MODEL)
+CLAUDE_INK_EFFORT = _env("ALPHASURFACE_INK_EFFORT", "low")
 
-# General-purpose fast model for research, youtube query optimization,
-# persona analysis, and document analysis.
-FAST_MODEL = _env("ALPHASURFACE_MODEL_FAST", "gemini-2.5-flash")
+# Background sub-agents.
+CLAUDE_RESEARCH_EFFORT = _env("ALPHASURFACE_RESEARCH_EFFORT", "medium")
+CLAUDE_SUPER_THINK_EFFORT = _env("ALPHASURFACE_SUPER_THINK_EFFORT", "high")
 
-# Deeper reasoning model used by SuperThink.
-THINKING_MODEL = _env("ALPHASURFACE_MODEL_THINKING", "gemini-2.5-pro")
+# ── OpenAI (voice only) ──────────────────────────────────────────────────────
+OPENAI_STT_MODEL = _env("ALPHASURFACE_STT_MODEL", "gpt-4o-transcribe")
+OPENAI_TTS_MODEL = _env("ALPHASURFACE_TTS_MODEL", "gpt-4o-mini-tts")
+OPENAI_TTS_VOICE = _env("ALPHASURFACE_TTS_VOICE", "alloy")
 
-# Image generation model.
-IMAGE_MODEL = _env("ALPHASURFACE_MODEL_IMAGE", "gemini-2.5-flash-image")
+
+def has_claude_credentials() -> bool:
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+
+
+def has_openai_credentials() -> bool:
+    return bool(os.environ.get("OPENAI_API_KEY"))

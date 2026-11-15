@@ -1,36 +1,24 @@
+# AlphaSurface Whiteboard
 
-# AlphaSurface
+**A handwriting-first AI whiteboard.** Write and sketch with an Apple Pencil, S Pen or your finger. The AI reads your ink, answers next to it in its own handwriting, and you can talk to it while you draw.
 
-**AI that thinks alongside you — not for you.**
-
-AlphaSurface is a real-time voice and vision AI co-thinker built on an infinite canvas. There is no chat box, no prompt field, no "ask AI" button. The AI watches what you draw, listens to what you say, and responds spatially — placing shapes, notes, provocations, and research directly onto a shared whiteboard.
-
-Built for the [Gemini Live Agent Challenge](https://geminiliveagentchallenge.devpost.com/) (Live Agents category).
-
-[![Python](https://img.shields.io/badge/Python-3.12+-blue)](https://python.org)
-[![React](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash_Live-orange)](https://ai.google.dev)
-[![ADK](https://img.shields.io/badge/Google_ADK-1.10+-green)](https://google.github.io/adk-docs)
-[![tldraw](https://img.shields.io/badge/tldraw-v4-purple)](https://tldraw.dev)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+Forked from the open-source [AlphaSurface](https://github.com/adr1en360/AlphaSurface). This edition is rebuilt around pen input and runs on **Claude** (reasoning, handwriting, research) and **OpenAI** (voice).
 
 ---
 
-## ✍️ Whiteboard Edition: pencil, finger & AI ink
-
-This fork adapts AlphaSurface into a **handwriting-first AI whiteboard**. Write and sketch with an Apple Pencil, S Pen or other stylus, or just your finger, and the AI reads your ink and answers in ink.
+## Features
 
 | Feature | What it does |
 |---|---|
-| **Pencil + finger input** | Opens in the pen tool. Once a stylus is detected, *Pencil only* mode turns on (palm rejection): the pencil draws, **one finger pans**, two fingers pinch-zoom, a **two-finger tap undoes** and a three-finger tap redoes. Without a stylus, your finger draws. |
-| **Reads handwriting & sketches** | When you pause, nearby strokes are grouped and sent to Gemini, which recognizes text, math, shapes, arrows and doodles. The live agent sees each group as one `ink` shape with its transcription. Select ink to see what the AI read ("Reads: …"). |
-| **Tidy** | Turns rough ink into clean typed text (same size and position), neat shapes with their labels, and arrows bound to those shapes. Doodles stay as ink. One undo restores your strokes. Also works by voice ("tidy this up"). |
-| **AI draws back in ink** | The agent annotates like a person with a pen: `ink_mark` (circle, underline, check, cross, star, bracket, ?), `ink_connect` (hand-drawn arrows) and `ink_write` (handwritten margin replies). AI ink is violet and animates in stroke by stroke. |
-| **Auto-answer** | Handwrite a question or an unfinished problem (`12 × 8 =`, `why does this fail?`) and the AI writes the answer next to it. Toggle with the 💡 button. |
-| **Ask AI** | Select anything and tap **?**. The AI gets an image of the selection plus the recognized text, and responds next to it. |
-| **Installable PWA** | Add to Home Screen on iPad and Android, or install from desktop Chrome/Edge. It runs full-screen and the canvas opens offline (AI features need the network). |
-
-All existing features (voice, research, YouTube, images, documents, Super Think) keep working.
+| **Pencil + finger input** | Opens ready to draw. Once a stylus is detected, *Pencil only* mode turns on (palm rejection): the pencil draws, **one finger pans**, two fingers pinch-zoom, a **two-finger tap undoes** and a three-finger tap redoes. Without a stylus, your finger draws. |
+| **Reads your handwriting** | When you pause, nearby strokes are grouped and Claude recognizes text, math, shapes, arrows and drawings. Select some ink to see what it read ("Reads: …"). |
+| **Answers in ink** | The AI circles, underlines, ticks, crosses out, stars or adds "?" to your work, draws arrows between ideas, and writes short handwritten replies. Its ink is violet and animates in like a pen. |
+| **Auto-answer** | Write a question or unfinished problem (`12 × 8 =`, `why does this fail?`) and the answer appears next to it. Toggle with 💡. |
+| **Ask AI** | Select anything and tap **?** to get a response next to it. |
+| **Tidy** | Turns rough ink into clean typed text, neat shapes and connected arrows. One undo brings your strokes back. Also works by voice ("tidy this up"). |
+| **Voice** | Talk while you draw. Replies are spoken and shown as captions. Talking over the AI stops it. |
+| **Research & deep analysis** | "Look up …" places a web-researched card on the board; "super think" places a deep analysis of the whole board. |
+| **Installable app** | Add to Home Screen on iPad or Android, or install from desktop Chrome/Edge. Runs full screen; the board opens offline (AI needs the network). |
 
 ### Ink dock (right edge)
 
@@ -41,613 +29,173 @@ All existing features (voice, research, YouTube, images, documents, Super Think)
 | ? | Ask AI about the selection, or about the screen |
 | 💡 | Auto-answer handwritten questions on/off |
 
-### How it fits together
+---
+
+## How it works
 
 ```
-pen strokes ──(pause 1.4s)──► cluster nearby strokes ──► render PNG of the cluster
-      │                                                        │
-      │                                       POST /api/ink/recognize (Gemini Flash,
-      │                                       structured output: text/math/shape/arrow/doodle)
-      ▼                                                        │
-lead stroke meta.ink = {text, intent, elements, bounds} ◄───────┘
-      │                         │                              └─ question? → nudges the live agent
-      ▼                         ▼
- canvas snapshot: "ink"     Tidy: elements → text / geo / arrow shapes
-      │
-      ▼
- live agent ──► ink_mark / ink_connect / ink_write ──► animated violet pen strokes
+                          ┌──────────── backend (FastAPI) ─────────────┐
+ pen strokes ─(pause)─► POST /api/ink/recognize ─► Claude (vision,       │
+                          │                        structured output)   │
+                          │      question? ─────────────┐               │
+ voice (16 kHz PCM) ─WS─► VAD ─► OpenAI speech-to-text ─┤               │
+ "Ask AI" ───────────WS──────────────────────────────── ▼               │
+                          │              CanvasAgent: Claude + canvas    │
+ board snapshot + ────WS─►│              tools (ink_write, ink_mark,     │
+ screenshot               │              ink_connect, tidy_ink, …)       │
+                          │                 │                 │          │
+ canvas actions ◄────WS───┼─────────────────┘                 │ reply    │
+ spoken reply   ◄────WS───┼── OpenAI text-to-speech ◄──────────┘          │
+                          └─────────────────────────────────────────────┘
 ```
+
+- **Claude** (`claude-opus-5-5` by default) does everything that needs judgment: reading ink, deciding how to answer, calling canvas tools, research (with web search) and deep analysis. Requests use the server-side refusal fallback, so if Claude declines a request on policy grounds, a fallback model answers instead of returning nothing.
+- **OpenAI** handles voice only: `gpt-4o-transcribe` for speech-to-text and `gpt-4o-mini-tts` for speech, streamed as 24 kHz PCM.
+- Voice-activity detection runs on the server: an utterance ends after ~0.7 s of quiet. Expect about 1–3 s from the end of your sentence to the first word of the reply.
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.12+ with [uv](https://docs.astral.sh/uv/)
+- Node.js 18+
+- An [Anthropic API key](https://console.anthropic.com) (required)
+- An [OpenAI API key](https://platform.openai.com) (optional; enables voice)
+
+### 1. Backend
+
+```bash
+cd backend
+uv sync
+cat > .env <<'EOF'
+ANTHROPIC_API_KEY=your_anthropic_key
+OPENAI_API_KEY=your_openai_key      # optional: without it, voice is off
+EOF
+uv run uvicorn main:app --reload --port 8000
+```
+
+Check it: `curl localhost:8000/health` → `{"claude": true, "voice": true, …}`
+
+### 2. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173.
 
 ### Using it on a tablet
 
-1. Run the backend and frontend as described below. The Vite dev server listens on your LAN (`host: true`).
-2. Browsers only allow the microphone over HTTPS (or on `localhost`). To test voice on a tablet, put the frontend behind an HTTPS tunnel or deploy it. Ink features work over plain LAN HTTP.
-3. Open the URL in Safari or Chrome and choose **Share → Add to Home Screen**.
+1. The Vite dev server listens on your LAN (`host: true`), so you can open `http://<your-computer-ip>:5173` on the tablet.
+2. Browsers only allow the microphone over HTTPS (or on `localhost`). For voice on a tablet, put the frontend behind an HTTPS tunnel or deploy it. Ink features work over plain LAN HTTP.
+3. In Safari or Chrome, choose **Share → Add to Home Screen**.
 
 ### tldraw license
 
-The upstream repo hard-coded a tldraw evaluation key that expired on 2026-06-21. With it, tldraw hides the editor 5 seconds after load. The key has been removed. tldraw runs unlicensed on `localhost`. **For any deployed URL, set a key from [tldraw.dev](https://tldraw.dev):**
+tldraw runs unlicensed on `localhost`. **Any deployed URL needs a license key** from [tldraw.dev](https://tldraw.dev); without one, tldraw hides the board 5 seconds after load.
 
 ```env
 # frontend/.env
 VITE_TLDRAW_LICENSE_KEY=your_tldraw_license_key
 ```
 
-### Extra environment variables
+---
+
+## Configuration
+
+All settings are environment variables in `backend/.env`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ALPHASURFACE_MODEL_INK` | `ALPHASURFACE_MODEL_FAST` | Model for handwriting and sketch recognition |
-| `VITE_TLDRAW_LICENSE_KEY` (frontend) | none | tldraw license; required for production domains |
+| `ANTHROPIC_API_KEY` | none (required) | Claude |
+| `OPENAI_API_KEY` | none | Voice (speech-to-text and text-to-speech) |
+| `ALPHASURFACE_CLAUDE_MODEL` | `claude-opus-5-5` | Model for the canvas agent, research and deep analysis |
+| `ALPHASURFACE_AGENT_EFFORT` | `low` | Agent effort (`low`…`max`); low keeps spoken replies fast |
+| `ALPHASURFACE_INK_MODEL` | same as above | Model for handwriting recognition |
+| `ALPHASURFACE_INK_EFFORT` | `low` | Effort for handwriting recognition |
+| `ALPHASURFACE_RESEARCH_EFFORT` | `medium` | Effort for web research |
+| `ALPHASURFACE_SUPER_THINK_EFFORT` | `high` | Effort for deep analysis |
+| `ALPHASURFACE_STT_MODEL` | `gpt-4o-transcribe` | OpenAI speech-to-text model |
+| `ALPHASURFACE_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI text-to-speech model |
+| `ALPHASURFACE_TTS_VOICE` | `alloy` | OpenAI voice |
+
+**Cost and speed:** handwriting recognition makes one Claude call per pause in writing. To cut cost and latency, set `ALPHASURFACE_INK_MODEL=claude-haiku-5-5`. Compare its accuracy on your own handwriting first.
 
 ---
 
-## Features
+## Deploying
 
-- **No chat box, no prompt field:** Interact by drawing and speaking — the AI responds spatially on the canvas.
-- **Two session modes:**
-  - **Think Mode:** For solo ideation, with AI-generated provocations to challenge your thinking.
-  - **Present Mode:** For live teaching/presenting, with real-time scribing and document-grounded answers.
-- **Specialist sub-agents:** Instantly trigger research, YouTube, image generation, and deep analysis tools by voice.
-- **Infinite canvas:** Built on tldraw v4 for collaborative, spatial thinking.
-- **Real-time voice and vision:** Powered by Gemini 2.5 Flash Native Audio and Google ADK.
-
----
-
-## Quickstart (Local)
-
-### Prerequisites
-
-- Python 3.12+
-- Node.js 18+
-- [uv](https://docs.astral.sh/uv/) package manager
-- A [Gemini API key](https://aistudio.google.com/apikey) (free tier works for the Live API)
-- Optional: YouTube Data API v3 key (for YouTube sub-agent)
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/adr1en360/AlphaSurface.git
-cd AlphaSurface
-```
-
-### 2. Install backend dependencies
+**Backend** (any container host, e.g. Google Cloud Run):
 
 ```bash
 cd backend
-uv sync
+gcloud run deploy alphasurface-backend --source . --region us-central1 \
+  --allow-unauthenticated --port 8000 \
+  --set-env-vars ANTHROPIC_API_KEY=...,OPENAI_API_KEY=...
 ```
 
-### 3. Configure environment variables
+**Frontend** (any static host, e.g. Vercel): set `VITE_TLDRAW_LICENSE_KEY`, point the `/ws` and `/api` proxy in `frontend/vite.config.js` (or your host's rewrites) at the backend URL, then `npm run build` and deploy `dist/`. Serve it over HTTPS so the microphone works.
 
-Create `backend/.env`:
-
-```env
-# Required
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Optional — enables YouTube sub-agent
-YOUTUBE_API_KEY=your_youtube_data_api_v3_key
-
-# Optional — image generation provider (gemini | pollinations | auto)
-ALPHASURFACE_IMAGE_PROVIDER=auto
-
-# Optional — Pollinations fallback for image gen rate limits
-POLLINATIONS_API_KEY=your_pollinations_key
-
-# Optional — override model strings
-ALPHASURFACE_MODEL_LIVE=gemini-2.5-flash-native-audio-preview-12-2025
-ALPHASURFACE_MODEL_FAST=gemini-2.5-flash
-ALPHASURFACE_MODEL_THINKING=gemini-2.5-pro
-
-# Cloud deployment
-MEMORY_BACKEND=sqlite          # sqlite (local) or firestore (cloud)
-GOOGLE_GENAI_USE_VERTEXAI=false
-```
-
-### 4. Install frontend dependencies
-
-```bash
-cd ../frontend
-npm install
-```
+Use HTTPS in production and keep API keys on the backend only.
 
 ---
 
-## Running Locally
-
-Start the backend in one terminal:
-
-```bash
-cd backend
-uv run uvicorn main:app --reload --port 8000
-```
-
-Start the frontend in a second terminal:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173) in your browser.
-
-**Health check:**
-```bash
-curl http://localhost:8000/health
-```
-
----
-
-## Cloud Deployment (Production)
-
-AlphaSurface is production-ready for Google Cloud Run (backend) and Vercel (frontend).
-
-### Prerequisites
-
-1. Install the [Google Cloud CLI (`gcloud`)](https://cloud.google.com/sdk/docs/install) and run `gcloud auth login`.
-2. Create a Google Cloud Project with billing enabled.
-3. Install the [Vercel CLI](https://vercel.com/docs/cli) (`npm i -g vercel`) and run `vercel login`.
-
-### 1. Deploy the Backend to Google Cloud Run
-
-```bash
-cd backend
-gcloud run deploy alphasurface-backend \
-  --source . \
-  --project YOUR_PROJECT_ID \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY="YOUR_GEMINI_API_KEY",MEMORY_BACKEND="firestore",GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID" \
-  --memory 1Gi \
-  --port 8000
-```
-*After deploy, copy the Service URL (e.g., `https://alphasurface-backend-xxxxxx-uc.a.run.app`).*
-
-### 2. Configure and Deploy the Frontend to Vercel
-
-1. Edit `frontend/vite.config.js`:
-   - Change the proxy target to your Cloud Run backend URL.
-   - Add `changeOrigin: true` to the proxy config.
-2. Deploy:
-
-```bash
-cd ../frontend
-vercel --prod
-```
-*Vercel will provide a live URL after deploy.*
-
----
-
-
-## Architecture
-
-```mermaid
-graph TD
-    %% Frontend Layer
-    subgraph Browser ["Frontend (React + tldraw)"]
-        Canvas["Infinite Canvas"]
-        Mic["Microphone Input"]
-        AudioOut["Audio Playback"]
-    end
-
-    %% Connection Layer
-    WebSocket["WebSocket Connection<br/>(PCM Audio, Canvas Snapshots, Actions)"]
-
-    Browser <-->|Real-time data| WebSocket
-
-    %% Backend Layer
-    subgraph Backend ["FastAPI Backend (main.py)"]
-        LiveOrchestrator["AlphaSurfaceAgent<br/>(ADK LiveRequestQueue + Runner)"]
-        Dispatcher["Sub-Agent Dispatcher"]
-        
-        %% Database Connection
-        DB[("Memory<br/>(SQLite / Firestore)")]
-        LiveOrchestrator <--> DB
-        
-        %% Core Gemini Connection
-        GeminiLive["Gemini 2.5 Flash Native Audio<br/>(Live API)"]
-        LiveOrchestrator <-->|Voice, Vision, Tool Calls| GeminiLive
-
-        %% Sub-Agents
-        subgraph SubAgents ["Specialist Sub-Agents"]
-            Research["Research Agent"]
-            ImageGen["Image Gen Agent"]
-            Document["Document Agent"]
-            SuperThink["Super Think Agent"]
-            YouTube["YouTube Agent"]
-            Persona["Persona Agent (Disabled by Default)"]
-        end
-
-        LiveOrchestrator -->|Task Queue| Dispatcher
-        Dispatcher --> SubAgents
-        
-        %% Secondary Gemini Connections
-        Research --> GeminiFlash["Gemini 2.5 Flash"]
-        Document --> GeminiFlash
-        SuperThink --> GeminiPro["Gemini 2.5 Pro"]
-        Persona --> GeminiFlash
-        ImageGen --> Imagen["Gemini Imagen<br/>(Fallback: Pollination.ai)"]
-        YouTube --> YTAPI["YouTube Data API"]
-    end
-
-    WebSocket <--> LiveOrchestrator
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React 19, Vite, tldraw v4, Framer Motion |
-| Backend | Python 3.12, FastAPI, WebSockets, uv |
-| AI — Live voice | Gemini 2.5 Flash Native Audio (`gemini-2.5-flash-native-audio-preview-12-2025`) |
-| AI — Sub-agents | Gemini 2.5 Flash via Google ADK |
-| AI — Deep analysis | Gemini 2.5 Pro with extended thinking budget |
-| AI — Image generation | Gemini Imagen / Pollinations fallback |
-| Agent framework | Google Agent Development Kit (ADK) |
-| Memory | SQLite (local), Firestore (Cloud Run) |
-| Cloud | Google Cloud Run |
-
----
-
-## Prerequisites
-
-- Python 3.12+
-- Node.js 18+
-- [uv](https://docs.astral.sh/uv/) package manager
-- A [Gemini API key](https://aistudio.google.com/apikey) (free tier works for the Live API)
-- Optional: YouTube Data API v3 key (for YouTube sub-agent)
-
----
-
-## Local Setup
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/adr1en360/AlphaSurface.git
-cd AlphaSurface
-```
-
-### 2. Install backend dependencies
-
-```bash
-cd backend
-uv sync
-```
-
-### 3. Configure environment variables
-
-Create `backend/.env`:
-
-```env
-# Required
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Optional — enables YouTube sub-agent
-YOUTUBE_API_KEY=your_youtube_data_api_v3_key
-
-# Optional — image generation provider (gemini | pollinations | auto)
-ALPHASURFACE_IMAGE_PROVIDER=auto
-
-# Optional — Pollinations fallback for image gen rate limits
-POLLINATIONS_API_KEY=your_pollinations_key
-
-# Optional — override model strings
-ALPHASURFACE_MODEL_LIVE=gemini-2.5-flash-native-audio-preview-12-2025
-ALPHASURFACE_MODEL_FAST=gemini-2.5-flash
-ALPHASURFACE_MODEL_THINKING=gemini-2.5-pro
-
-# Cloud deployment
-MEMORY_BACKEND=sqlite          # sqlite (local) or firestore (cloud)
-GOOGLE_GENAI_USE_VERTEXAI=false
-```
-
-### 4. Install frontend dependencies
-
-```bash
-cd ../frontend
-npm install
-```
-
----
-
-## Running Locally
-
-Start the backend in one terminal:
-
-```bash
-cd backend
-uv run uvicorn main:app --reload --port 8000
-```
-
-Start the frontend in a second terminal:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173) in your browser.
-
-**Health check:**
-```bash
-curl http://localhost:8000/health
-```
-
----
-
-
-## Usage & Onboarding
-
-On first launch, you’ll see the onboarding flow:
-
-1. **Choose a mode:** Think Mode (solo) or Present Mode (live presentation)
-2. **Describe your session focus:** (optional, helps the AI orient)
-3. **Upload reference material:** PDFs or Docx files (Present Mode only)
-
-Config is saved to `localStorage` so you skip onboarding on subsequent visits. To reset:
-
-```js
-localStorage.removeItem("alpha_surface_config")
-```
-
-### Think Mode
-
-- Talk freely about your ideas while drawing on the canvas
-- Go quiet for ~8 seconds — a violet provocation note will appear
-- Say "research X", "find a video on Y", or "generate an image of Z" to trigger sub-agents
-- Say "super think" or "deep dive" for a full Gemini 2.5 Pro analysis
-- Say "organize this" to align and distribute shapes
-
-### Present Mode
-
-- Pre-load a document via onboarding or the main menu
-- Present — the AI scribes dates, concepts, and key points onto the canvas
-- Ask "what does the document say about X?" for grounded answers
-- The AI stays silent unless spoken to
-
-### Controls
-
-The status pill (top-center) shows AI state and has two toggles:
-
-| Toggle | Function |
-|---|---|
-| 🎤 MIC ON/OFF | Mute/unmute your microphone (AI stops receiving audio) |
-| 🔊 SPEAKER ON/OFF | Mute/unmute AI voice output (you still send audio) |
-
-
-The tldraw hamburger menu (top-left) contains:
-
-- **Save canvas** — exports canvas state as `.tldr` file
-- **Load canvas** — imports a saved `.tldr` file
-- **Export PDF** — renders all pages to a multi-page PDF
-- **Upload document** — adds a document for the agent to reference
-
----
-
-## 🧪 Reproducible Testing (For Judges)
-
-To verify the core functionalities of AlphaSurface, please follow these testing steps once the app is running (either locally or via the provided deployed URL).
-
-**Test 1: Core Voice & Spatial Canvas (Think Mode)**
-1. Launch the app and select **Think Mode** in the onboarding modal.
-2. Unmute your microphone using the top-center Status Pill.
-3. **Action:** Draw a simple flowchart or write a few words on the canvas.
-4. **Speak:** *"I'm drawing out a new system architecture, what do you think I should add?"*
-5. **Expected Result:** The Gemini Live agent will reply verbally, understanding the spatial context of what you just drew, and may place a violet "provocation" note on the canvas.
-
-**Test 2: Sub-Agent Dispatch (YouTube & Research)**
-1. While still in Think Mode, test the tool-calling dispatch system.
-2. **Speak:** *"Can you find a YouTube video explaining the Gemini Live API?"*
-3. **Expected Result:** The Live Orchestrator will pause, dispatch the `YouTube Agent`, and embed a playable YouTube video directly onto your canvas.
-4. **Speak:** *"Generate an image of a futuristic robot working on a whiteboard."*
-5. **Expected Result:** The `Image Gen Agent` will generate and place an image on the canvas (demonstrating the Gemini Imagen/Pollinations fallback logic).
-
-**Test 3: Document Grounding (Present Mode)**
-1. Refresh the page or use the top-left hamburger menu to clear the config and select **Present Mode**.
-2. Upload a sample PDF or DOCX file when prompted.
-3. **Speak:** *"What are the three main takeaways from this document?"*
-4. **Expected Result:** The AI will analyze the document and physically scribe the key points onto the canvas as text blocks.
-
----
-
-## Project Structure
+## Project structure
 
 ```
-AlphaSurface/
-├── backend/
-│   ├── main.py                 # FastAPI server + WebSocket handler
-│   ├── live_session.py         # Gemini Live API session management
-│   ├── agent.py                # ADK LlmAgent factory
-│   ├── agent_tasks.py          # Task queue + scratch pad
-│   ├── dispatcher.py           # Routes tasks to sub-agents
-│   ├── event_bus.py            # Idle detection + provocation cooldowns
-│   ├── memory.py               # SQLite / Firestore dual backend
-│   ├── model_config.py         # Model string constants
-│   ├── prompts/
-│   │   ├── base.txt            # Core agent personality
-│   │   ├── think_mode.txt      # Think Mode addendum
-│   │   ├── present_mode.txt    # Present Mode addendum
-│   │   └── loader.py           # Prompt builder
-│   ├── tools/
-│   │   ├── basic_write.py      # add_note, add_geo, zoom_to_fit, memory...
-│   │   ├── smart_write.py      # place_near, place_in_empty_space
-│   │   ├── organize.py         # align, distribute, stack, rotate...
-│   │   ├── spatial_read.py     # get_viewport_context, get_canvas_map...
-│   │   ├── semantic.py         # label_shape, get_semantic_graph
-│   │   ├── pen_draw.py         # draw_freehand
-│   │   ├── ink_annotate.py     # ink_mark, ink_connect, ink_write, tidy_ink (AI ink)
-│   │   ├── dispatch.py         # dispatch_research, dispatch_youtube...
-│   │   └── state.py            # Shared canvas state
-│   ├── ink/
-│   │   ├── recognizer.py       # Gemini handwriting/sketch recognition (structured output)
-│   │   ├── geometry.py         # Hand-drawn marks, connectors, target resolution
-│   │   └── api.py              # POST /api/ink/recognize, Ask AI, auto-answer
-│   └── sub_agents/
-│       ├── research_agent.py
-│       ├── image_gen_agent.py
-│       ├── youtube_agent.py
-│       ├── document_agent.py
-│       ├── super_think_agent.py
-│       ├── continuation_agent.py
-│       └── persona_agent.py
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── agent/AlphaSurfaceInner.jsx  # WS, mic, canvas capture, status
-│   │   ├── audio/AudioPlayback.js       # PCM audio playback singleton
-│   │   ├── canvas/
-│   │   │   ├── canvasActions.js         # All tldraw shape operations
-│   │   │   ├── canvasSnapshot.js        # Three-tier spatial context builder
-│   │   │   └── shapeConverters.js       # BlurryShape / FocusedShape / Clusters
-│   │   ├── ink/
-│   │   │   ├── inkModel.js              # Stroke clustering, fingerprints, helpers
-│   │   │   ├── inkRecognition.js        # Pause detection → /api/ink/recognize
-│   │   │   ├── inkTidy.js               # Ink → clean text / shapes / arrows
-│   │   │   ├── penInput.js              # Palm rejection, finger pan, tap undo
-│   │   │   └── inkStore.js              # Ink UI state + preferences
-│   │   └── components/
-│   │       ├── InkToolbar.jsx           # Pencil / Tidy / Ask AI / Auto-answer dock
-│   │       ├── OnboardingFlow.jsx
-│   │       ├── StatusPill.jsx
-│   │       └── AlphaMainMenu.jsx
-│   ├── public/                          # PWA manifest, service worker, icons
-│   └── vite.config.js
-└── README.md
+backend/
+├── main.py                 # FastAPI: WebSocket hub, wiring
+├── model_config.py         # Models + provider settings (env-overridable)
+├── brain/
+│   ├── canvas_agent.py     # Claude tool loop: board → tools → spoken reply
+│   ├── tool_schema.py      # Python functions → Claude tool definitions
+│   └── claude.py           # Shared client, effort, refusal fallback
+├── voice/
+│   ├── segmenter.py        # Server-side voice activity detection
+│   └── session.py          # OpenAI speech-to-text / text-to-speech, barge-in
+├── ink/
+│   ├── recognizer.py       # Claude handwriting/sketch recognition
+│   ├── geometry.py         # Hand-drawn marks and arrows for AI ink
+│   └── api.py              # /api/ink/recognize, Ask AI, auto-answer
+├── tools/                  # Canvas tools Claude can call
+├── sub_agents/             # Research (web search) and deep analysis
+├── prompts/system.txt      # The agent's instructions
+└── tests/                  # pytest (no API keys needed)
+frontend/
+├── src/
+│   ├── App.jsx, components/StartScreen.jsx
+│   ├── agent/AlphaSurfaceInner.jsx   # WebSocket, mic, snapshots, captions
+│   ├── ink/                          # Pen input, recognition, Tidy
+│   ├── canvas/                       # Canvas actions + snapshot builder
+│   └── components/InkToolbar.jsx     # Ink dock + caption chip
+└── public/                           # PWA manifest, service worker, icons
 ```
-
----
-
-## Environment Variables Reference
-
-| Variable | Default | Description |
-|---|---|---|
-| `GEMINI_API_KEY` | — | **Required.** AI Studio API key. |
-| `YOUTUBE_API_KEY` | — | YouTube Data API v3. Required for YouTube sub-agent. |
-| `ALPHASURFACE_MODEL_LIVE` | `gemini-2.5-flash-native-audio-preview-12-2025` | Live voice model. |
-| `ALPHASURFACE_MODEL_FAST` | `gemini-2.5-flash` | Sub-agent model. |
-| `ALPHASURFACE_MODEL_THINKING` | `gemini-2.5-pro` | SuperThink deep analysis model. |
-| `ALPHASURFACE_MODEL_IMAGE` | `gemini-2.5-flash-image` | Image generation model. |
-| `ALPHASURFACE_IMAGE_PROVIDER` | `auto` | `gemini`, `pollinations`, or `auto` (Gemini with Pollinations fallback on 429). |
-| `POLLINATIONS_API_KEY` | — | Pollinations API key for image fallback. |
-| `ALPHASURFACE_BASE_URL` | `http://localhost:8000` | Base URL for serving static images. Override for Cloud Run. |
-| `MEMORY_BACKEND` | `sqlite` | `sqlite` (local) or `firestore` (Cloud Run). |
-| `MEMORY_DB_PATH` | `backend/alphasurface_memory.db` | SQLite file path override. |
-| `GOOGLE_GENAI_USE_VERTEXAI` | `false` | Set `true` to use Vertex AI instead of AI Studio. |
-| `GOOGLE_CLOUD_PROJECT` | — | Required if using Vertex AI. |
-
----
-
-## Cloud Deployment (Google Cloud Run)
-
-### Prerequisites
-
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated
-- A GCP project with billing enabled
-- Cloud Run, Artifact Registry, and Firestore APIs enabled
-
-### Deploy
-
-```bash
-# Build and push container
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/alphasurface-backend ./backend
-
-# Deploy to Cloud Run
-gcloud run deploy alphasurface-backend \
-  --image gcr.io/YOUR_PROJECT_ID/alphasurface-backend \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY=your_key,MEMORY_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID \
-  --memory 1Gi \
-  --port 8000
-```
-
-### Frontend
-
-Update `frontend/vite.config.js` to proxy to your Cloud Run URL, then deploy the frontend to Firebase Hosting, Cloud Run, or any static host.
 
 ---
 
 ## Development
 
-### Backend tests
-
 ```bash
-cd backend
-uv run pytest
+cd backend && uv run pytest     # 41 tests, all offline (fake Claude/OpenAI clients)
+cd frontend && npx eslint src   # lint
 ```
 
-### Frontend lint
-
-```bash
-cd frontend
-npm run lint
-```
-
-### Adding a new tool
-
-1. Implement the function in the relevant `tools/` file
-2. Import it in `tools/__init__.py` and add it to `ALL_TOOLS`
-3. Add a docstring — the agent uses it to decide when to call the tool
-4. Restart the backend
-
-### Adding a new sub-agent
-
-1. Create `sub_agents/your_agent.py` with an `async def run(payload, broadcast_fn)` handler
-2. Register it in `main.py` lifespan with `register_handler("your_agent", handler)`
-3. Add a `dispatch_your_agent(...)` function in `tools/dispatch.py`
-4. Import and expose it in `tools/__init__.py`
+**Add a canvas tool:** write a function with type hints and a clear docstring in `backend/tools/`, then add it to `AGENT_TOOLS` in `tools/__init__.py`. Its schema is generated from the signature.
 
 ---
 
-## Key Design Decisions
+## Known limitations
 
-**No text channel.** All AI output is spatial — shapes, notes, arrows, embeds. There is no chat panel and no text fallback. This is intentional and is the core differentiator.
-
-**Sarkar provocations.** Based on Advait Sarkar's research on AI as a thinking partner. The AI challenges and supports human thinking rather than replacing it. Provocations are always open questions, never answers or statements.
-
-**Three-tier canvas context.** The frontend sends a structured spatial snapshot every 3 seconds: focused shapes (selected/agent-placed, full detail), blurry shapes (viewport overview), and peripheral clusters (off-screen shapes grouped by proximity). This gives Gemini spatial awareness without flooding its context window.
-
-**Orchestrator + continuation pattern.** The Live Agent handles real-time voice and quick canvas actions. Complex multi-step tasks are deferred to the ContinuationAgent so the live voice session stays responsive.
+- Voice uses separate speech-to-text and text-to-speech calls, not a live speech-to-speech model, so replies take about 1–3 s. Replacing it with OpenAI's Realtime API is possible, but its transcription event format should be checked against current docs first.
+- Box positions from handwriting recognition are approximate. Tidy places clean shapes close to, but not always exactly on, the original strokes.
+- Single shared session: every connected browser sees the same board and the same AI.
 
 ---
 
-## Known Limitations
+## License & acknowledgements
 
-- Gemini Live API sessions have a 12-minute hard limit; AlphaSurface auto-reconnects
-- YouTube sub-agent requires a YouTube Data API v3 key with the API enabled in your GCP project
-- Image generation falls back to Pollinations when Gemini Imagen quota is exhausted
-- PersonaAgent is disabled by default to reduce API calls during development
-
----
-
-## Contributing
-
-1. Fork the repository and create a branch
-2. Keep pull requests focused on one feature or fix
-3. Test both Think Mode and Present Mode before opening a PR
-4. Include a summary of what changed and why
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE) for details.
-
----
-
-
-## Acknowledgements
-
-- [Advait Sarkar](https://advait.org) — research on AI as a thinking partner, not a replacement ([YouTube talk](https://youtu.be/3lPnN8omdPA?si=u42NSZIWLtgHaBsT))
-- [tldraw](https://tldraw.dev) — infinite canvas foundation
-- [Google ADK](https://google.github.io/adk-docs) — agent orchestration
-- [Gemini Live API](https://ai.google.dev/gemini-api/docs/live) — real-time voice and vision
-
----
-
-*Built for the Gemini Live Agent Challenge 2026 · [Devpost](https://geminiliveagentchallenge.devpost.com)*
+MIT. Based on [AlphaSurface](https://github.com/adr1en360/AlphaSurface) and inspired by [Advait Sarkar](https://advait.org)'s research on AI as a thinking partner ([talk](https://youtu.be/3lPnN8omdPA)). Built on [tldraw](https://tldraw.dev).

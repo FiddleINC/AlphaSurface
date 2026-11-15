@@ -23,6 +23,9 @@ let state = {
   pending: 0,
   lastTranscript: "",
   lastError: "",
+  // Spoken-reply / transcript caption shown above the toolbar
+  caption: "",
+  captionAt: 0,
   // Answer handwritten questions ("12 × 8 =", "why?") automatically
   autoRespond: prefs.autoRespond ?? true,
   // Recognize handwriting after each pause

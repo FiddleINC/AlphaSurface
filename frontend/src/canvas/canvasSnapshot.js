@@ -2,7 +2,7 @@
 // Builds the three-tier snapshot sent to the Python backend via WebSocket.
 // Replaces the flat shape list from the old App.jsx canvas_snapshot.
 //
-// The Python backend feeds this into Gemini's context so it understands
+// The Python backend feeds this into Claude's context so it understands
 // the canvas spatially — not just as a flat list of all shapes.
 
 import {

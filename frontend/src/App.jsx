@@ -9,25 +9,19 @@ import "tldraw/tldraw.css"
 import { activatePlaybackContext, setPlaybackEnabled } from "./audio/AudioPlayback"
 import { AlphaSurfaceInner } from "./agent/AlphaSurfaceInner"
 import { AlphaMainMenu } from "./components/AlphaMainMenu"
-import { OnboardingFlow } from "./components/OnboardingFlow"
+import { StartScreen } from "./components/StartScreen"
 
 export default function App() {
-  const [config, setConfig] = useState(() => {
-    const saved = localStorage.getItem("alpha_surface_config")
-    if (saved) {
-      try { return JSON.parse(saved) } catch { return null }
-    }
-    return null
-  })
+  // Shown on every launch: the start tap unlocks audio playback and the mic.
+  const [config, setConfig] = useState(null)
 
   const handleLaunch = useCallback((cfg) => {
     setPlaybackEnabled(cfg.voiceEnabled)
     if (cfg.voiceEnabled) activatePlaybackContext()
     setConfig(cfg)
-    localStorage.setItem("alpha_surface_config", JSON.stringify(cfg))
   }, [])
 
-  if (!config) return <OnboardingFlow onComplete={handleLaunch} />
+  if (!config) return <StartScreen onStart={handleLaunch} />
 
   return (
     <div style={{ position: "fixed", inset: 0 }}>

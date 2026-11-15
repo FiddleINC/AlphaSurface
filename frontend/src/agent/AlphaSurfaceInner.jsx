@@ -22,6 +22,7 @@ import { StatusPill } from "../components/StatusPill"
 import { InkToolbar } from "../components/InkToolbar"
 import { startInkRecognition } from "../ink/inkRecognition"
 import { startPenInput } from "../ink/penInput"
+import { setInkState } from "../ink/inkStore"
 
 
 export function AlphaSurfaceInner({ config }) {
@@ -40,9 +41,6 @@ export function AlphaSurfaceInner({ config }) {
   const listeningRef = useRef(false)
   const listeningTimeoutRef = useRef(null)
   const configRef = useRef(config)
-
-  const provocFreq = "Normal"
-  const provocStyle = "Socratic"
 
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { listeningRef.current = listening }, [listening])
@@ -63,18 +61,7 @@ export function AlphaSurfaceInner({ config }) {
         setAiStatus("idle")
         socket.send(JSON.stringify({
           type: "set_config",
-          payload: {
-            mode: configRef.current.mode,
-            webSearch: configRef.current.webSearch,
-            voiceEnabled: configRef.current.voiceEnabled,
-            mcps: configRef.current.mcps,
-            goal: configRef.current.goal,
-            audience: configRef.current.audience,
-            uploadedFile: configRef.current.uploadedFile,
-            model: configRef.current.model,
-            provocationFrequency: provocFreq,
-            provocationStyle: provocStyle,
-          },
+          payload: { voiceEnabled: configRef.current.voiceEnabled },
         }))
       }
 
@@ -85,7 +72,20 @@ export function AlphaSurfaceInner({ config }) {
         catch { console.warn("[AlphaSurface] Dropped malformed WS message"); return }
 
         if (message.type === "ai_status") {
-          setAiStatus(message.payload?.status ?? "idle")
+          const { status = "idle", detail } = message.payload ?? {}
+          setAiStatus(status === "listening" ? "idle" : status)
+          if (status === "listening") { listeningRef.current = true; setListening(true) }
+          if (detail) setInkState({ caption: detail, captionAt: Date.now() })
+          return
+        }
+
+        // Captions: what the AI heard, and what it answered.
+        if (message.type === "user_transcript") {
+          setInkState({ caption: `You: ${message.payload?.text ?? ""}`, captionAt: Date.now() })
+          return
+        }
+        if (message.type === "ai_reply") {
+          setInkState({ caption: message.payload?.text ?? "", captionAt: Date.now() })
           return
         }
 
@@ -175,7 +175,7 @@ export function AlphaSurfaceInner({ config }) {
     return () => { clearInterval(interval); clearTimeout(debounce); unsub() }
   }, [ws, editor])
 
-  // ── Canvas image → Gemini vision ──────────────────────────────────────────
+  // ── Canvas image → Claude vision ──────────────────────────────────────────
   useEffect(() => {
     if (!ws || !editor) return
 
@@ -303,6 +303,7 @@ export function AlphaSurfaceInner({ config }) {
       listeningRef.current = false; setListening(false)
       if (listeningTimeoutRef.current) { clearTimeout(listeningTimeoutRef.current); listeningTimeoutRef.current = null }
     }
+    sendMessage({ type: "set_audio", payload: { muted: next } })
     // Mic mute does not affect speaker
     if (!next) activatePlaybackContext()
     if (next) flushAudioPlayback()
@@ -313,6 +314,7 @@ export function AlphaSurfaceInner({ config }) {
     const next = !speakerMuted
     setSpeakerMuted(next)
     setPlaybackEnabled(!next)
+    sendMessage({ type: "set_speaker", payload: { muted: next } })
     if (!next) activatePlaybackContext()
     if (next) flushAudioPlayback()
   }
