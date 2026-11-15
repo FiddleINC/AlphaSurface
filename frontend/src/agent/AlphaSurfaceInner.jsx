@@ -110,7 +110,11 @@ export function AlphaSurfaceInner({ config }) {
   useEffect(() => {
     if (!config.voiceEnabled) return
     let disposed = false
-    startRealtimeVoice({ send: sendMessage, onState: setVoiceState })
+    startRealtimeVoice({
+      send: sendMessage,
+      onState: setVoiceState,
+      onDisconnect: (reason) => { voiceRef.current = null; caption(reason) },
+    })
       .then((voice) => {
         if (disposed) { voice.close(); return }
         voiceRef.current = voice
@@ -209,7 +213,7 @@ export function AlphaSurfaceInner({ config }) {
       <StatusPill
         aiStatus={status}
         listening={voiceState === "listening"}
-        voiceOn={voiceState !== "off"}
+        voiceOn={voiceState !== "off" && voiceState !== "connecting"}
         muted={muted}
         speakerMuted={speakerMuted}
         onToggleMute={handleToggleMute}

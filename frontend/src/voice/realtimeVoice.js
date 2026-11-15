@@ -29,10 +29,11 @@ const TOOL_TIMEOUT_MS = 60_000
  * Start a voice session.
  * @param {object} opts
  * @param {(msg: object) => void} opts.send   send a message to the backend WebSocket
- * @param {(state: string) => void} opts.onState  "listening" | "thinking" | "speaking" | "idle"
+ * @param {(state: string) => void} opts.onState  "listening" | "thinking" | "speaking" | "idle" | "off"
+ * @param {(reason: string) => void} [opts.onDisconnect]  the call dropped after connecting
  * @returns {Promise<{resolve, speak, mute, setSpeakerMuted, close}>}
  */
-export async function startRealtimeVoice({ send, onState }) {
+export async function startRealtimeVoice({ send, onState, onDisconnect }) {
   const res = await fetch("/api/voice/session", { method: "POST" })
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
@@ -77,8 +78,29 @@ export async function startRealtimeVoice({ send, onState }) {
     else if (event.type === "input_audio_buffer.speech_stopped") onState?.("idle")
   })
   session.on("error", (err) => console.warn("[Voice] Realtime error", err))
+  if (import.meta.env.DEV) window.__alphaVoiceSession = session // debugging / e2e hook
 
-  await session.connect({ apiKey: key })
+  // The calls endpoint needs ?model= even with an ephemeral key (verified
+  // against the live API: without it, 400 "You must provide a model parameter").
+  let closedByUs = false
+  const failPending = (text) => {
+    for (const done of pending.values()) done(text)
+    pending.clear()
+  }
+
+  await session.connect({
+    apiKey: key,
+    url: `https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(model)}`,
+  })
+
+  // If the call drops (network change, laptop sleep, blocked media), say so
+  // instead of silently showing voice as on.
+  session.transport.on("connection_change", (status) => {
+    if (status !== "disconnected" || closedByUs) return
+    failPending("The voice connection dropped.")
+    onState?.("off")
+    onDisconnect?.("Voice disconnected. Restart the app to reconnect.")
+  })
 
   return {
     /** Deliver Claude's answer to the waiting use_whiteboard call. */
@@ -99,8 +121,8 @@ export async function startRealtimeVoice({ send, onState }) {
     mute(muted) { session.mute(muted) },
     setSpeakerMuted(muted) { audioElement.muted = muted },
     close() {
-      for (const done of pending.values()) done("The voice session ended.")
-      pending.clear()
+      closedByUs = true
+      failPending("The voice session ended.")
       session.close()
     },
   }
