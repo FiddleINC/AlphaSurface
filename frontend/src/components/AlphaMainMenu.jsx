@@ -3,6 +3,8 @@
 
 import { useEditor, getSnapshot, loadSnapshot, DefaultMainMenu, DefaultMainMenuContent, TldrawUiMenuGroup, TldrawUiMenuItem } from "tldraw"
 import { jsPDF } from "jspdf"
+import { explainBoard } from "../board/explainBoard"
+import { setInkState } from "../ink/inkStore"
 
 export function AlphaMainMenu() {
   const editor = useEditor()
@@ -118,6 +120,10 @@ export function AlphaMainMenu() {
 
   return (
     <DefaultMainMenu>
+      <TldrawUiMenuGroup id="alphasurface-ai-actions">
+        <TldrawUiMenuItem id="alphasurface-explain" label="Explain my board" readonlyOk onSelect={() => explainBoard(editor)} />
+        <TldrawUiMenuItem id="alphasurface-examples" label="Show examples" readonlyOk onSelect={() => setInkState({ welcomeOpen: true })} />
+      </TldrawUiMenuGroup>
       <TldrawUiMenuGroup id="alphasurface-file-actions">
         <TldrawUiMenuItem id="alphasurface-save" label="Save canvas" readonlyOk onSelect={handleSave} />
         <TldrawUiMenuItem id="alphasurface-load" label="Load canvas" readonlyOk onSelect={handleLoad} />

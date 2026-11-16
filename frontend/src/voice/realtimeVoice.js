@@ -20,6 +20,10 @@ answering or checking their work, writing, drawing, marking, tidying, organizing
 or deep analysis — call use_whiteboard with their request in your own words, including any
 detail they gave. Before calling it, say at most two or three words ("Let me look.", "On it.").
 When it returns, say its answer naturally in one short sentence; don't add facts it did not give.
+Questions about homework, math or anything they are working on count as board requests:
+send them to use_whiteboard instead of answering yourself, because the user's chosen mode
+(for example Tutor, which gives hints instead of answers) is applied there.
+When they ask to explain, summarize or recap the board or the session, call explain_board.
 For small talk that has nothing to do with the board, just answer briefly.
 Be warm and concise. Never read long text aloud.`
 
@@ -29,11 +33,12 @@ const TOOL_TIMEOUT_MS = 60_000
  * Start a voice session.
  * @param {object} opts
  * @param {(msg: object) => void} opts.send   send a message to the backend WebSocket
+ * @param {() => Promise<string>} [opts.explain]  run "Explain my board"; returns a line to say
  * @param {(state: string) => void} opts.onState  "listening" | "thinking" | "speaking" | "idle" | "off"
  * @param {(reason: string) => void} [opts.onDisconnect]  the call dropped after connecting
  * @returns {Promise<{resolve, speak, mute, setSpeakerMuted, close}>}
  */
-export async function startRealtimeVoice({ send, onState, onDisconnect }) {
+export async function startRealtimeVoice({ send, explain, onState, onDisconnect }) {
   const res = await fetch("/api/voice/session", { method: "POST" })
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
@@ -60,7 +65,22 @@ export async function startRealtimeVoice({ send, onState, onDisconnect }) {
     }),
   })
 
-  const agent = new RealtimeAgent({ name: "AlphaSurface", instructions: INSTRUCTIONS, tools: [useWhiteboard] })
+  const explainBoardTool = tool({
+    name: "explain_board",
+    description:
+      "Write a summary of the whole board (overview, key points, open questions, next steps) " +
+      "and show it on screen. Returns the overview to say.",
+    parameters: z.object({}),
+    timeoutMs: TOOL_TIMEOUT_MS,
+    execute: async () => {
+      onState?.("thinking")
+      return explain ? explain() : "Explain isn't available."
+    },
+  })
+
+  const agent = new RealtimeAgent({
+    name: "AlphaSurface", instructions: INSTRUCTIONS, tools: [useWhiteboard, explainBoardTool],
+  })
 
   // Our own <audio> element so the speaker toggle can mute playback.
   const audioElement = document.createElement("audio")

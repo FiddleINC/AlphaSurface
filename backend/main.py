@@ -8,6 +8,8 @@ AlphaSurface — FastAPI server for the AI whiteboard.
      ink_ask          → CanvasAgent ("Ask AI" on a selection)
   POST /api/ink/recognize → Claude handwriting recognition (+ auto-answer)
   POST /api/voice/session → short-lived key for the browser's Realtime session
+  POST /api/board/explain → written summary of the board ("Explain my board")
+  WS   set_mode           → assistant mode (tutor / checker / collab / quiet)
 
   CanvasAgent (Claude) tool calls → canvas_action_queue → broadcast → browser
   CanvasAgent reply → ai_reply (+ voice_result) → browser, spoken by Realtime
@@ -31,6 +33,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 load_dotenv()
 
 import tools as canvas_tools  # noqa: E402
+from board.explain import create_board_router  # noqa: E402
 from brain.canvas_agent import CanvasAgent  # noqa: E402
 from dispatcher import register_handler, run_dispatcher  # noqa: E402
 from ink.api import InkCoordinator, create_ink_router  # noqa: E402
@@ -121,6 +124,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(create_ink_router(ink_coordinator))
 app.include_router(create_voice_router())
+app.include_router(create_board_router())
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:4173", "http://localhost:3000"],
@@ -147,6 +151,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_text(json.dumps({"type": "ai_status", "payload": {
         "status": "idle" if agent.available else "disconnected",
         "voice": has_openai_credentials(),
+        "mode": agent.mode,
     }}))
 
     try:
@@ -161,6 +166,9 @@ async def websocket_endpoint(websocket: WebSocket):
             elif msg_type == "canvas_image":
                 if payload.get("data"):
                     agent.set_canvas_image(base64.b64decode(payload["data"]), payload.get("mime", "image/jpeg"))
+
+            elif msg_type == "set_mode":
+                agent.set_mode(payload.get("mode"))
 
             elif msg_type == "voice_request":
                 req_id, text = str(payload.get("id", "")), str(payload.get("request", "")).strip()

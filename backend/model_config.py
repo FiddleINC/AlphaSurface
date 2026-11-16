@@ -21,6 +21,8 @@ CLAUDE_INK_EFFORT = _env("ALPHASURFACE_INK_EFFORT", "low")
 # Background sub-agents.
 CLAUDE_RESEARCH_EFFORT = _env("ALPHASURFACE_RESEARCH_EFFORT", "medium")
 CLAUDE_SUPER_THINK_EFFORT = _env("ALPHASURFACE_SUPER_THINK_EFFORT", "high")
+# "Explain my board" session summary.
+CLAUDE_EXPLAIN_EFFORT = _env("ALPHASURFACE_EXPLAIN_EFFORT", "medium")
 
 # ── OpenAI Realtime (voice only) ─────────────────────────────────────────────
 # Speech-to-speech model the browser talks to over WebRTC. It handles the

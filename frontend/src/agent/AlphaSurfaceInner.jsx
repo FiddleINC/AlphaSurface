@@ -5,15 +5,19 @@
 //   - Board snapshot (every 3s + on shape change) and screenshot for Claude
 //   - Realtime voice session (OpenAI) that hands board requests to Claude
 //   - Status pill, ink toolbar, captions
+//   - Assistant mode sync, first-run examples, "Explain my board" panel
 
 import { useEffect, useRef, useState } from "react"
 import { useEditor } from "tldraw"
+import { explainBoard } from "../board/explainBoard"
 import { handleCanvasMessage } from "../canvas/canvasActions"
 import { sendCanvasSnapshot } from "../canvas/canvasSnapshot"
+import { ExplainPanel } from "../components/ExplainPanel"
 import { InkToolbar } from "../components/InkToolbar"
 import { StatusPill } from "../components/StatusPill"
+import { WelcomeCard } from "../components/WelcomeCard"
 import { startInkRecognition } from "../ink/inkRecognition"
-import { setInkState } from "../ink/inkStore"
+import { getInkState, setInkState, useInkState } from "../ink/inkStore"
 import { startPenInput } from "../ink/penInput"
 import { startRealtimeVoice } from "../voice/realtimeVoice"
 
@@ -31,6 +35,7 @@ export function AlphaSurfaceInner({ config }) {
   const wsRef = useRef(null)
   const voiceRef = useRef(null)
   const prevShapeCount = useRef(0)
+  const { mode } = useInkState()
 
   const sendMessage = (msg) => {
     const socket = wsRef.current
@@ -50,6 +55,7 @@ export function AlphaSurfaceInner({ config }) {
       socket.onopen = () => {
         retryDelay = 1000
         setWs(socket)
+        socket.send(JSON.stringify({ type: "set_mode", payload: { mode: getInkState().mode } }))
       }
 
       socket.onmessage = (event) => {
@@ -97,6 +103,19 @@ export function AlphaSurfaceInner({ config }) {
     return () => { disposed = true; clearTimeout(retryTimeout); socket?.close() }
   }, [editor])
 
+  // ── Assistant mode → backend ────────────────────────────────────────────
+  useEffect(() => {
+    sendMessage({ type: "set_mode", payload: { mode } })
+  }, [mode])
+
+  // ── First run: offer examples on an empty board ──────────────────────────
+  useEffect(() => {
+    if (!editor || getInkState().welcomed) return
+    // tldraw has loaded the persisted board by the time the editor mounts.
+    if (editor.getCurrentPageShapeIds().size === 0) setInkState({ welcomeOpen: true })
+    else setInkState({ welcomed: true })
+  }, [editor])
+
   // ── Pencil / finger input + handwriting recognition ───────────────────────
   useEffect(() => {
     if (!editor) return
@@ -112,6 +131,12 @@ export function AlphaSurfaceInner({ config }) {
     let disposed = false
     startRealtimeVoice({
       send: sendMessage,
+      explain: async () => {
+        const res = await explainBoard(editor)
+        return res.status === "done"
+          ? `${res.data.overview} The full summary is on screen.`
+          : res.error || "I couldn't summarize the board."
+      },
       onState: setVoiceState,
       onDisconnect: (reason) => { voiceRef.current = null; caption(reason) },
     })
@@ -130,7 +155,7 @@ export function AlphaSurfaceInner({ config }) {
       voiceRef.current?.close()
       voiceRef.current = null
     }
-  }, [config.voiceEnabled])
+  }, [config.voiceEnabled, editor])
 
   // ── Board snapshot → backend ──────────────────────────────────────────────
   useEffect(() => {
@@ -209,6 +234,12 @@ export function AlphaSurfaceInner({ config }) {
       )}
 
       <InkToolbar sendMessage={sendMessage} aiConnected={aiStatus !== "disconnected"} />
+      <WelcomeCard
+        sendMessage={sendMessage}
+        syncBoard={() => sendCanvasSnapshot(editor, wsRef.current)}
+        aiConnected={aiStatus !== "disconnected"}
+      />
+      <ExplainPanel />
 
       <StatusPill
         aiStatus={status}

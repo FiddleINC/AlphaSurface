@@ -13,7 +13,10 @@ Forked from the open-source [AlphaSurface](https://github.com/adr1en360/AlphaSur
 | **Pencil + finger input** | Opens ready to draw. Once a stylus is detected, *Pencil only* mode turns on (palm rejection): the pencil draws, **one finger pans**, two fingers pinch-zoom, a **two-finger tap undoes** and a three-finger tap redoes. Without a stylus, your finger draws. |
 | **Reads your handwriting** | When you pause, nearby strokes are grouped and Claude recognizes text, math, shapes, arrows and drawings. Select some ink to see what it read ("Reads: …"). |
 | **Answers in ink** | The AI circles, underlines, ticks, crosses out, stars or adds "?" to your work, draws arrows between ideas, and writes short handwritten replies. Its ink is violet and animates in like a pen. |
-| **Auto-answer** | Write a question or unfinished problem (`12 × 8 =`, `why does this fail?`) and the answer appears next to it. Toggle with 💡. |
+| **AI modes** | Choose how the AI helps: **Tutor** (hints and guiding questions, never the answer), **Checker** (only marks work right or wrong), **Collaborator** (answers and adds ideas) or **Quiet** (acts only when asked). The mode applies to handwriting, Ask AI and voice. |
+| **Auto-answer** | Write a question or unfinished problem (`12 × 8 =`, `why does this fail?`) and the AI responds next to it, in the style of the current mode. Tutor and Checker also look at written math work without a question. Quiet turns this off. |
+| **Explain my board** | A written summary of the page (overview, key points, open questions, next steps). Copy it, or save it as Markdown or as a PDF with the board image. From the dock, the main menu, or by voice ("explain my board"). |
+| **First-run examples** | An empty board on first launch offers three tappable examples (solve, check my work, ask) and the mode choice. Reopen from the main menu → *Show examples*. |
 | **Ask AI** | Select anything and tap **?** to get a response next to it. |
 | **Tidy** | Turns rough ink into clean typed text, neat shapes and connected arrows. One undo brings your strokes back. Also works by voice ("tidy this up"). |
 | **Voice** | Talk while you draw, like a phone call: low-latency speech-to-speech with natural turn-taking. Talk over the AI to interrupt it. Replies also appear as captions. |
@@ -27,7 +30,8 @@ Forked from the open-source [AlphaSurface](https://github.com/adr1en360/AlphaSur
 | ✎ / ✋ | Pencil only on (finger pans) / off (finger draws) |
 | ✦ | Tidy the selected ink, or all ink on screen |
 | ? | Ask AI about the selection, or about the screen |
-| 💡 | Auto-answer handwritten questions on/off |
+| 📄 | Explain my board (written summary) |
+| 🎓 ✔✔ 🤝 🌙 | AI mode: Tutor / Checker / Collaborator / Quiet (tap to choose) |
 
 ---
 
@@ -117,6 +121,7 @@ All settings are environment variables in `backend/.env`.
 | `ALPHASURFACE_INK_EFFORT` | `low` | Effort for handwriting recognition |
 | `ALPHASURFACE_RESEARCH_EFFORT` | `medium` | Effort for web research |
 | `ALPHASURFACE_SUPER_THINK_EFFORT` | `high` | Effort for deep analysis |
+| `ALPHASURFACE_EXPLAIN_EFFORT` | `medium` | Effort for "Explain my board" |
 | `ALPHASURFACE_REALTIME_MODEL` | `gpt-realtime-2.1` | OpenAI Realtime voice model (`gpt-realtime-2.1-mini` is cheaper) |
 | `ALPHASURFACE_REALTIME_VOICE` | `marin` | Voice (`marin`, `cedar`, `alloy`, …) |
 

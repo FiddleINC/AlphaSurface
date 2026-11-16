@@ -3,18 +3,21 @@
 //   ✎ Pencil only — palm rejection: stylus draws, finger pans
 //   ✦ Tidy        — convert handwriting/sketches into clean shapes
 //   ? Ask AI      — send the selection (or the screen) to the AI
-//   💡 Auto-answer — let the AI answer handwritten questions by itself
+//   Mode        — Tutor / Checker / Collaborator / Quiet (how proactive the AI is)
+//   Explain     — written summary of the board (copy, Markdown, PDF)
 // Plus a chip that shows what the AI read from the selected ink.
 
 import { useEffect, useState } from "react"
 import { useEditor, useValue } from "tldraw"
-import { Hand, Lightbulb, LightbulbOff, MessageCircleQuestion, PenLine, Sparkles } from "lucide-react"
+import { FileText, Hand, MessageCircleQuestion, PenLine, Sparkles } from "lucide-react"
 
+import { explainBoard } from "../board/explainBoard"
+import { askAboutShapes } from "../ink/askAi"
 import { isUserInk } from "../ink/inkModel"
-import { recognizeNow, renderShapes } from "../ink/inkRecognition"
 import { getInkState, setInkState, useInkState } from "../ink/inkStore"
 import { tidyInk } from "../ink/inkTidy"
 import { setPencilOnly } from "../ink/penInput"
+import { MODE_INFO, MODE_ORDER } from "./modeInfo"
 
 const glass = {
   background: "rgba(6,6,8,0.78)",
@@ -56,6 +59,7 @@ export function InkToolbar({ sendMessage, aiConnected }) {
   const editor = useEditor()
   const ink = useInkState()
   const [toast, setToast] = useState("")
+  const [modeMenu, setModeMenu] = useState(false)
 
   const pencilOnly = useValue("pen mode", () => editor.getInstanceState().isPenMode, [editor])
   const selection = useValue("selection", () => editor.getSelectedShapes(), [editor])
@@ -109,27 +113,27 @@ export function InkToolbar({ sendMessage, aiConnected }) {
     if (shapes.length === 0) { flash("Write or select something first"); return }
 
     try {
-      const inkIds = shapes.filter(isUserInk).map(s => s.id)
-      if (inkIds.length) await recognizeNow(editor, inkIds)
-      const fresh = shapes.map(s => editor.getShape(s.id)).filter(Boolean)
-      const transcript = fresh.map(inkText).filter(Boolean).join("\n")
-      const rendered = await renderShapes(editor, fresh, { padding: 32, format: "png" })
-      sendMessage({
-        type: "ink_ask",
-        payload: {
-          shapeIds: fresh.map(s => s.id),
-          transcript,
-          question: "",
-          image: rendered?.image,
-          mime: rendered?.mime,
-        },
-      })
+      await askAboutShapes(editor, shapes, sendMessage)
       flash(selection.length ? "Asked AI about the selection" : "Asked AI about the screen")
     } catch (err) {
       console.warn("[Ink] Ask failed", err)
       flash("Could not send to AI")
     }
   }
+
+  const chooseMode = (m) => {
+    setModeMenu(false)
+    setInkState({ mode: m })
+    flash(`${MODE_INFO[m].label}: ${MODE_INFO[m].blurb}`)
+  }
+
+  const handleExplain = () => {
+    if (!aiConnected) { flash("AI is offline"); return }
+    if (editor.getCurrentPageShapeIds().size === 0) { flash("Write something first"); return }
+    explainBoard(editor)
+  }
+
+  const current = MODE_INFO[ink.mode] ?? MODE_INFO.collab
 
   const statusText =
     ink.status === "reading" ? "Reading ink…"
@@ -162,14 +166,57 @@ export function InkToolbar({ sendMessage, aiConnected }) {
         <DockButton label="Ask AI about the selection" onClick={handleAsk}>
           <MessageCircleQuestion size={22} />
         </DockButton>
+        <DockButton label="Explain my board: written summary" busy={ink.explain?.status === "loading"} onClick={handleExplain}>
+          <FileText size={22} />
+        </DockButton>
+        <div style={{ height: 1, margin: "2px 8px", background: "rgba(255,255,255,0.1)" }} />
         <DockButton
-          label={ink.autoRespond ? "Auto-answer handwritten questions: on" : "Auto-answer handwritten questions: off"}
-          active={ink.autoRespond}
-          onClick={() => setInkState({ autoRespond: !ink.autoRespond })}
+          label={`AI mode: ${current.label}. Tap to change`}
+          active={ink.mode !== "quiet"}
+          onClick={() => setModeMenu(v => !v)}
         >
-          {ink.autoRespond ? <Lightbulb size={22} /> : <LightbulbOff size={22} />}
+          <current.Icon size={22} />
         </DockButton>
       </div>
+
+      {modeMenu && (
+        <>
+          <div onPointerDown={() => setModeMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
+          <div
+            role="menu"
+            aria-label="AI mode"
+            style={{
+              ...glass, position: "fixed", zIndex: 9999, borderRadius: 18, padding: 6,
+              right: "calc(max(10px, env(safe-area-inset-right)) + 70px)", top: "50%",
+              transform: "translateY(-10%)", width: "min(300px, calc(100vw - 100px))",
+            }}
+          >
+            {MODE_ORDER.map(m => {
+              const { label, Icon, blurb } = MODE_INFO[m]
+              const on = m === ink.mode
+              return (
+                <button
+                  key={m} type="button" role="menuitemradio" aria-checked={on}
+                  onClick={() => chooseMode(m)}
+                  style={{
+                    display: "flex", gap: 12, alignItems: "flex-start", width: "100%", textAlign: "left",
+                    padding: "10px 12px", minHeight: 56, borderRadius: 12, border: "none", cursor: "pointer",
+                    background: on ? "rgba(139,92,246,0.28)" : "transparent",
+                    color: on ? "#ddd6fe" : "rgba(255,255,255,0.88)", fontFamily: glass.fontFamily,
+                    touchAction: "manipulation",
+                  }}
+                >
+                  <Icon size={20} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>
+                    <span style={{ display: "block", fontWeight: 600, fontSize: 14 }}>{label}</span>
+                    <span style={{ display: "block", fontSize: 12, lineHeight: 1.4, opacity: 0.7, marginTop: 2 }}>{blurb}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       {statusText && (
         <div

@@ -83,7 +83,7 @@ async function recognizeCluster(editor, strokes) {
       ...rendered,
       shapeIds: strokes.map(s => s.id),
       context: nearbyContext(editor, bounds),
-      autoRespond: getInkState().autoRespond,
+      mode: getInkState().mode,
     }),
   })
   if (!res.ok) {

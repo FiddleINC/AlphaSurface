@@ -15,6 +15,8 @@ import anthropic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from brain.modes import auto_respond_instruction, auto_respond_triggers, normalize_mode
+
 from .recognizer import PageRect, has_ink_credentials, recognize_ink, to_page_elements
 
 # Max decoded image size we accept from the browser.
@@ -29,21 +31,23 @@ class RecognizeRequest(BaseModel):
     rect: PageRect
     shapeIds: list[str] = Field(default_factory=list)
     context: str = ""
-    autoRespond: bool = True
+    autoRespond: bool = True  # legacy clients; `mode` wins when given
+    mode: Optional[str] = None
 
 
 def _short_ids(ids: list[str]) -> str:
     return ",".join(i[6:] if i.startswith("shape:") else i for i in ids[:12])
 
 
-def build_auto_respond_prompt(transcript: str, intent: str, shape_ids: list[str]) -> str:
+def build_auto_respond_prompt(
+    transcript: str, intent: str, shape_ids: list[str], mode: str = "collab",
+) -> str:
     target = _short_ids(shape_ids)
     return (
         f"The user just handwrote this on the whiteboard ({intent}): \"{transcript[:400]}\". "
-        f"Its ink strokes are shapeIds [{target}]. It invites an answer. "
-        f"Reply IN INK right next to it: call ink_write(text=<short answer>, near=\"{target}\"). "
-        "Keep the written answer to one short line (for math: just the result or the next step). "
-        "Optionally ink_mark the key part. Speak at most one short sentence, or stay silent."
+        f"Its ink strokes are shapeIds [{target}]. Nobody asked you directly. "
+        f"{auto_respond_instruction(mode, target)} "
+        "Speak at most one short sentence, or stay silent."
     )
 
 
@@ -77,7 +81,10 @@ class InkCoordinator:
         self._last_auto_respond = 0.0
 
     def maybe_auto_respond(self, result: dict, req: RecognizeRequest, image: bytes) -> bool:
-        if not (req.autoRespond and result.get("asks_ai") and result.get("transcript")):
+        mode = normalize_mode(req.mode) if req.mode else ("collab" if req.autoRespond else "quiet")
+        if not result.get("transcript"):
+            return False
+        if not auto_respond_triggers(mode, bool(result.get("asks_ai")), result.get("intent", "")):
             return False
         now = time.monotonic()
         if now - self._last_auto_respond < AUTO_RESPOND_COOLDOWN_S:
@@ -85,8 +92,12 @@ class InkCoordinator:
         agent = self._get_agent()
         if agent is None:
             return False
+        if req.mode and hasattr(agent, "set_mode"):
+            agent.set_mode(mode)  # keep the agent in step with the browser's mode
         sent = agent.submit(
-            build_auto_respond_prompt(result["transcript"], result.get("intent", "note"), req.shapeIds),
+            build_auto_respond_prompt(
+                result["transcript"], result.get("intent", "note"), req.shapeIds, mode,
+            ),
             source="auto_answer", image=image, mime=req.mime,
         )
         if sent:

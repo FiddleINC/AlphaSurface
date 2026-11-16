@@ -17,6 +17,12 @@ function loadPrefs() {
 
 const prefs = loadPrefs()
 
+// Assistant modes (see backend/brain/modes.py). Older installs stored a
+// plain on/off auto-answer flag: off maps to Quiet, on to Collaborator.
+export const MODES = ["tutor", "checker", "collab", "quiet"]
+const initialMode = MODES.includes(prefs.mode) ? prefs.mode
+  : prefs.autoRespond === false ? "quiet" : "collab"
+
 let state = {
   // "idle" | "reading" | "tidying" | "unavailable" | "rate_limited"
   status: "idle",
@@ -26,11 +32,18 @@ let state = {
   // Spoken-reply / transcript caption shown above the toolbar
   caption: "",
   captionAt: 0,
-  // Answer handwritten questions ("12 × 8 =", "why?") automatically
-  autoRespond: prefs.autoRespond ?? true,
+  // How proactive / revealing the AI is: "tutor" | "checker" | "collab" | "quiet"
+  mode: initialMode,
   // Recognize handwriting after each pause
   recognitionEnabled: prefs.recognitionEnabled ?? true,
+  // First-run examples card; `welcomed` persists once dismissed
+  welcomed: prefs.welcomed ?? false,
+  welcomeOpen: false,
+  // "Explain my board" panel: { status: "loading" | "done" | "error", data, error }
+  explain: null,
 }
+
+const PERSISTED = ["mode", "recognitionEnabled", "welcomed"]
 
 const listeners = new Set()
 
@@ -40,12 +53,9 @@ export function getInkState() {
 
 export function setInkState(patch) {
   state = { ...state, ...patch }
-  if ("autoRespond" in patch || "recognitionEnabled" in patch) {
+  if (PERSISTED.some(k => k in patch)) {
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({
-        autoRespond: state.autoRespond,
-        recognitionEnabled: state.recognitionEnabled,
-      }))
+      localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map(k => [k, state[k]]))))
     } catch { /* storage unavailable (private mode) */ }
   }
   listeners.forEach(fn => fn())

@@ -30,6 +30,7 @@ from prompts.loader import load_prompt
 from tools import AGENT_TOOLS, canvas_state
 
 from .claude import get_client, request_defaults, text_of
+from .modes import DEFAULT_MODE, mode_line, normalize_mode
 from .tool_schema import ToolBox
 
 MAX_TOOL_ROUNDS = 8
@@ -92,12 +93,17 @@ class CanvasAgent:
         self._queue: asyncio.Queue[Turn] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
         self.busy = False
+        self.mode = DEFAULT_MODE
 
     # ── inputs ───────────────────────────────────────────────────────────────
 
     @property
     def available(self) -> bool:
         return self._client is not None or has_claude_credentials()
+
+    def set_mode(self, mode: str) -> str:
+        self.mode = normalize_mode(mode)
+        return self.mode
 
     def set_canvas_image(self, image: bytes, mime: str = "image/jpeg") -> None:
         self._latest_image = (image, mime)
@@ -164,7 +170,7 @@ class CanvasAgent:
         label = _SOURCE_PREFIX.get(turn.source, "Request")
         content.append({
             "type": "text",
-            "text": f"Board: {board_summary()}\n\n{label}: {turn.text}",
+            "text": f"Board: {board_summary()}\n\n{mode_line(self.mode)}\n\n{label}: {turn.text}",
         })
         return content
 
