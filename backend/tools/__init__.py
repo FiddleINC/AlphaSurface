@@ -4,7 +4,7 @@ Each tool is a plain Python function: its signature becomes the JSON input
 schema and its docstring the description (see brain/tool_schema.py).
 """
 
-from .state import update_canvas_state, canvas_action_queue, canvas_state
+from .state import canvas_action_queue, canvas_state
 from .spatial_read import get_viewport_context, find_shape_by_text, get_selected_shapes
 from .smart_write import place_near, place_in_empty_space
 from .organize import align_shapes, distribute_shapes, stack_shapes
@@ -32,4 +32,4 @@ AGENT_TOOLS = [
     dispatch_research, dispatch_super_think,
 ]
 
-__all__ = ["AGENT_TOOLS", "update_canvas_state", "canvas_action_queue", "canvas_state"]
+__all__ = ["AGENT_TOOLS", "canvas_action_queue", "canvas_state"]

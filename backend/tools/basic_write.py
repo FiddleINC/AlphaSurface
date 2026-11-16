@@ -1,5 +1,8 @@
-from .state import canvas_state, canvas_action_queue
 import uuid
+
+from .colors import normalize_color
+from .placement import find_free_spot
+from .state import canvas_action_queue, canvas_state, full_id
 
 _VALID_GEO = {
     "cloud", "rectangle", "ellipse", "triangle", "diamond", "pentagon",
@@ -9,36 +12,16 @@ _VALID_GEO = {
 }
 
 _GEO_ALIASES = {
-    "rounded_rectangle": "rectangle",
     "rounded-rectangle": "rectangle",
-    "rounded rect": "rectangle",
     "roundedrect": "rectangle",
     "roundedrectangle": "rectangle",
     "rect": "rectangle",
     "box": "rectangle",
+    "square": "rectangle",
     "circle": "ellipse",
 }
 
 _VALID_FILL = {"none", "semi", "solid", "pattern", "fill", "lined-fill"}
-
-_VALID_COLORS = {
-    "black", "grey", "light-violet", "violet", "blue", "light-blue",
-    "yellow", "orange", "green", "light-green", "light-red", "red", "white",
-}
-
-_COLOR_ALIASES = {
-    "gray": "grey",
-    "purple": "violet",
-    "light_purple": "light-violet",
-    "light-purple": "light-violet",
-    "light violet": "light-violet",
-    "light_blue": "light-blue",
-    "light blue": "light-blue",
-    "light_green": "light-green",
-    "light green": "light-green",
-    "light_red": "light-red",
-    "light red": "light-red",
-}
 
 _FILL_ALIASES = {
     "filled": "solid",
@@ -48,10 +31,11 @@ _FILL_ALIASES = {
 }
 
 
-def _normalize_geo(geo: str) -> str:
-    g = (geo or "rectangle").strip().lower().replace("_", "-")
+def normalize_geo(geo: str, default: str = "rectangle") -> str:
+    """Map a shape name ("circle", "rounded_rect", …) to a tldraw geo type."""
+    g = (geo or default).strip().lower().replace("_", "-").replace(" ", "-")
     g = _GEO_ALIASES.get(g, _GEO_ALIASES.get(g.replace("-", ""), g))
-    return g if g in _VALID_GEO else "rectangle"
+    return g if g in _VALID_GEO else default
 
 
 def _normalize_fill(fill: str) -> str:
@@ -60,74 +44,23 @@ def _normalize_fill(fill: str) -> str:
     return f if f in _VALID_FILL else "semi"
 
 
-def _normalize_color(color: str, default: str) -> str:
-    c = (color or default).strip().lower().replace("_", "-")
-    c = _COLOR_ALIASES.get(c, c)
-    return c if c in _VALID_COLORS else default
-
-
-def _find_non_overlapping_xy(x: int, y: int, w: int, h: int) -> tuple[int, int]:
-    shapes = canvas_state.get("shapes", [])
-
-    def overlaps(px: int, py: int) -> bool:
-        pad = 28
-        for s in shapes:
-            if not isinstance(s, dict):
-                continue
-            sx = int(s.get("x", 0))
-            sy = int(s.get("y", 0))
-            sw = int(s.get("w", 220))
-            sh = int(s.get("h", 120))
-            if (
-                px < sx + sw + pad
-                and px + w > sx - pad
-                and py < sy + sh + pad
-                and py + h > sy - pad
-            ):
-                return True
-        return False
-
-    if not overlaps(x, y):
-        return x, y
-
-    for ring in range(1, 12):
-        for dx, dy in [
-            (ring * 260, 0),
-            (0, ring * 160),
-            (-ring * 260, 0),
-            (0, -ring * 160),
-            (ring * 260, ring * 160),
-            (-ring * 260, ring * 160),
-            (ring * 260, -ring * 160),
-            (-ring * 260, -ring * 160),
-        ]:
-            tx, ty = x + dx, y + dy
-            if not overlaps(tx, ty):
-                return tx, ty
-
-    return x + 320, y + 220
-
-
-def _new_shape_id(prefix: str) -> str:
+def new_shape_id(prefix: str) -> str:
     return f"shape:{prefix}_{uuid.uuid4().hex[:10]}"
 
 
+def _ids(shape_ids: list[str]) -> list[str]:
+    return [full_id(i) for i in shape_ids if str(i).strip()]
+
+
 def _normalize_linked_to(linked_to) -> list[str]:
-    if linked_to is None:
-        return []
     if isinstance(linked_to, list):
         return [str(item).strip() for item in linked_to if str(item).strip()]
     if isinstance(linked_to, str):
         return [item.strip() for item in linked_to.split(",") if item.strip()]
-    return [str(linked_to).strip()] if str(linked_to).strip() else []
+    return []
 
 
-def _semantic_meta(
-    semantic_role: str,
-    source: str = "live_agent",
-    confidence: float = 0.75,
-    linked_to = "",
-) -> dict:
+def _semantic_meta(semantic_role: str, source: str, confidence: float, linked_to) -> dict:
     return {
         "semanticRole": semantic_role,
         "source": source,
@@ -135,113 +68,6 @@ def _semantic_meta(
         "linked_to": _normalize_linked_to(linked_to),
         "addedBy": source,
     }
-
-def list_canvas_shapes() -> dict:
-    return {
-        "shape_count": canvas_state["shape_count"],
-        "shapes": canvas_state["shapes"],
-    }
-
-
-def scan_canvas_text() -> dict:
-    notes, geo_labels, text_labels, other = [], [], [], []
-
-    for shape in canvas_state["shapes"]:
-        if not isinstance(shape, dict):
-            continue
-        text = shape.get("text") or ""
-        if not text.strip():
-            continue
-        shape_type = shape.get("type", "")
-        entry = {
-            "id": shape.get("id", ""),
-            "text": text.strip(),
-            "x": shape.get("x", 0), "y": shape.get("y", 0),
-            "color": shape.get("color", ""),
-            "semanticRole": shape.get("meta", {}).get("semanticRole", "unknown"),
-        }
-        if shape_type == "note":
-            notes.append(entry)
-        elif shape_type == "geo":
-            geo_labels.append(entry)
-        elif shape_type == "text":
-            text_labels.append(entry)
-        else:
-            other.append(entry)
-
-    return {
-        "sticky_notes": notes,
-        "geo_shapes": geo_labels,
-        "text_labels": text_labels,
-        "other": other,
-        "total_text_shapes": len(notes) + len(geo_labels) + len(text_labels) + len(other),
-    }
-
-
-
-
-def add_text_to_canvas(
-    text: str,
-    x: int,
-    y: int,
-    color: str,
-    size: str,
-    semantic_role: str = "text",
-    source: str = "live_agent",
-    confidence: float = 0.8,
-    linked_to: str = "",
-) -> str:
-    if size not in ["s", "m", "l", "xl"]:
-        size = "m"
-    normalized_color = _normalize_color(color, "black")
-    x, y = _find_non_overlapping_xy(int(x), int(y), 260, 88)
-    shape_id = _new_shape_id("text")
-    canvas_action_queue.put_nowait({
-        "type": "add_text",
-        "payload": {
-            "id": shape_id,
-            "text": text,
-            "x": x,
-            "y": y,
-            "color": normalized_color,
-            "size": size,
-            "meta": _semantic_meta(semantic_role, source, confidence, linked_to),
-        }
-    })
-    return f"Text placed at ({x},{y})"
-
-
-def add_note_to_canvas(
-    text: str,
-    x: int,
-    y: int,
-    color: str,
-    size: str,
-    semantic_role: str = "note",
-    source: str = "live_agent",
-    confidence: float = 0.75,
-    linked_to: str = "",
-) -> str:
-    if size not in ["s", "m", "l", "xl"]:
-        size = "m"
-    normalized_color = _normalize_color(color, "yellow")
-    x, y = _find_non_overlapping_xy(int(x), int(y), 280, 180)
-    shape_id = _new_shape_id("note")
-    if normalized_color in {"light-violet", "violet"} and "?" in (text or ""):
-        semantic_role = "provocation"
-    canvas_action_queue.put_nowait({
-        "type": "add_note",
-        "payload": {
-            "id": shape_id,
-            "text": text,
-            "x": x,
-            "y": y,
-            "color": normalized_color,
-            "size": size,
-            "meta": _semantic_meta(semantic_role, source, confidence, linked_to),
-        }
-    })
-    return f"Note placed at ({x},{y})"
 
 
 def add_geo_to_canvas(text: str, geo: str, x: int, y: int,
@@ -253,39 +79,26 @@ def add_geo_to_canvas(text: str, geo: str, x: int, y: int,
     """
     Create a geometric shape with a text label at an exact position. Prefer place_near / place_in_empty_space unless you computed coordinates.
 
-    geo: rectangle | ellipse | diamond | triangle | cloud | star | hexagon
-    color: black | blue | green | red | orange | violet | yellow | grey
-    fill: none | semi | solid
+    geo: rectangle | ellipse | diamond | triangle | cloud | star | hexagon | pentagon | octagon | heart
+    color: black | grey | blue | light-blue | green | light-green | red | light-red | orange | yellow | violet | light-violet | white
+    fill: none | semi | solid | pattern
     """
-    normalized_geo = _normalize_geo(geo)
-    normalized_fill = _normalize_fill(fill)
-    normalized_color = _normalize_color(color, "blue")
     final_w = int(w or 200)
     final_h = int(h or 120)
-    x, y = _find_non_overlapping_xy(int(x), int(y), final_w, final_h)
-    shape_id = _new_shape_id("geo")
+    x, y = find_free_spot(int(x), int(y), final_w, final_h, canvas_state["shapes"], step=(260, 160), pad=28)
+    shape_id = new_shape_id("geo")
+    geo = normalize_geo(geo)
     canvas_action_queue.put_nowait({
         "type": "add_geo",
         "payload": {
             "id": shape_id,
-            "text": text, "geo": normalized_geo,
+            "text": text, "geo": geo,
             "x": x, "y": y, "w": final_w, "h": final_h,
-            "color": normalized_color, "fill": normalized_fill,
+            "color": normalize_color(color, "blue"), "fill": _normalize_fill(fill),
             "meta": _semantic_meta(semantic_role, source, confidence, linked_to),
         }
     })
-    return f"{normalized_geo} placed id={shape_id}"
-
-
-def add_arrow_to_canvas(x1: int, y1: int, x2: int, y2: int,
-                        label: str, color: str) -> str:
-    normalized_color = _normalize_color(color, "black")
-    canvas_action_queue.put_nowait({
-        "type": "add_arrow",
-        "payload": {"x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                    "label": label or "", "color": normalized_color}
-    })
-    return f"Arrow ({x1},{y1})→({x2},{y2})"
+    return f"{geo} placed id={shape_id}"
 
 
 def bind_arrow(from_shape_id: str, to_shape_id: str,
@@ -293,38 +106,12 @@ def bind_arrow(from_shape_id: str, to_shape_id: str,
     """
     Draw a straight arrow that stays attached to two shapes (by shapeId). Use for clean typed diagrams; use ink_connect for hand-drawn arrows.
     """
-    normalized_color = _normalize_color(color, "black")
     canvas_action_queue.put_nowait({
         "type": "bind_arrow",
-        "payload": {"fromShapeId": from_shape_id, "toShapeId": to_shape_id,
-                    "label": label or "", "color": normalized_color}
+        "payload": {"fromShapeId": full_id(from_shape_id), "toShapeId": full_id(to_shape_id),
+                    "label": label or "", "color": normalize_color(color, "black")}
     })
     return f"Bound arrow {from_shape_id}→{to_shape_id}"
-
-
-
-def add_bookmark_to_canvas(
-    url: str,
-    x: int,
-    y: int,
-    semantic_role: str = "bookmark",
-    source: str = "live_agent",
-    confidence: float = 0.7,
-    linked_to: str = "",
-) -> str:
-    x, y = _find_non_overlapping_xy(int(x), int(y), 320, 180)
-    shape_id = _new_shape_id("bookmark")
-    canvas_action_queue.put_nowait({
-        "type": "add_bookmark",
-        "payload": {
-            "id": shape_id,
-            "url": url,
-            "x": x,
-            "y": y,
-            "meta": _semantic_meta(semantic_role, source, confidence, linked_to),
-        }
-    })
-    return f"Bookmarked {url}"
 
 
 def move_shape(shape_id: str, x: int, y: int) -> str:
@@ -333,7 +120,7 @@ def move_shape(shape_id: str, x: int, y: int) -> str:
     """
     canvas_action_queue.put_nowait({
         "type": "move_shape",
-        "payload": {"shapeId": shape_id, "x": x, "y": y}
+        "payload": {"shapeId": full_id(shape_id), "x": x, "y": y}
     })
     return f"Moved {shape_id} to ({x},{y})"
 
@@ -342,11 +129,11 @@ def update_shape(shape_id: str, text: str, color: str) -> str:
     """
     Change the text and/or color of an existing shape. Pass an empty string to keep a value unchanged.
     """
-    payload: dict = {"shapeId": shape_id}
+    payload: dict = {"shapeId": full_id(shape_id)}
     if text:
         payload["text"] = text
     if color:
-        payload["color"] = _normalize_color(color, "black")
+        payload["color"] = normalize_color(color, "black")
     canvas_action_queue.put_nowait({"type": "update_shape", "payload": payload})
     return f"Updated {shape_id}"
 
@@ -355,65 +142,29 @@ def delete_shapes(shape_ids: list[str]) -> str:
     """
     Delete shapes by id. Never delete the user's own work unless they asked.
     """
-    canvas_action_queue.put_nowait({
-        "type": "delete_shapes",
-        "payload": {"shapeIds": shape_ids}
-    })
-    return f"Deleted {len(shape_ids)} shape(s)"
+    ids = _ids(shape_ids)
+    canvas_action_queue.put_nowait({"type": "delete_shapes", "payload": {"shapeIds": ids}})
+    return f"Deleted {len(ids)} shape(s)"
 
 
 def zoom_to_fit() -> str:
-        """
-        Zoom the canvas viewport so ALL shapes are visible at once.
+    """
+    Zoom the canvas viewport so ALL shapes are visible at once.
 
-        ONLY call this when:
-        - The user explicitly says "zoom out", "show everything", "fit to screen"
-        - A fully complete multi-shape layout has just been placed (e.g. a complete diagram with 5+ shapes)
-        - After a sub-agent finishes placing a large cluster
+    ONLY call this when:
+    - The user explicitly says "zoom out", "show everything", "fit to screen"
+    - A fully complete multi-shape layout has just been placed (e.g. a complete diagram with 5+ shapes)
 
-        DO NOT call this:
-        - After placing a single shape
-        - After placing 2-3 shapes
-        - Repeatedly during a sequence of placements
-        - As a reflex after every canvas action
-        """
-        canvas_action_queue.put_nowait({"type": "zoom_to_fit", "payload": {}})
-        return "Zoomed to fit"
-
-
-def focus_shape(shape_id: str) -> str:
-        """
-        Zoom the viewport to center on a specific shape and select it.
-        Use when the user says "show me X", "go to X", or "focus on X".
-        Do not use speculatively — only when navigation is genuinely needed.
-        """
-        canvas_action_queue.put_nowait({
-            "type": "focus_shape",
-            "payload": {"shapeId": shape_id}
-        })
-        return f"Focused on {shape_id}"
-
-
-def select_shapes(shape_ids: list[str]) -> str:
-    canvas_action_queue.put_nowait({
-        "type": "select_shapes",
-        "payload": {"shapeIds": shape_ids}
-    })
-    return f"Selected {len(shape_ids)} shape(s)"
-
-
-def clear_canvas() -> str:
-    canvas_action_queue.put_nowait({"type": "clear_canvas", "payload": {}})
-    return "Canvas cleared"
+    DO NOT call this:
+    - After placing one to three shapes
+    - Repeatedly during a sequence of placements
+    - As a reflex after every canvas action
+    """
+    canvas_action_queue.put_nowait({"type": "zoom_to_fit", "payload": {}})
+    return "Zoomed to fit"
 
 
 def undo_last_action() -> str:
     """Undo the most recent canvas action the agent or user just made (Ctrl+Z)."""
-    canvas_action_queue.put_nowait({"type": "undo"})
+    canvas_action_queue.put_nowait({"type": "undo", "payload": {}})
     return "Undo applied"
-
-
-def redo_last_action() -> str:
-    """Redo the last undone canvas action (Ctrl+Shift+Z)."""
-    canvas_action_queue.put_nowait({"type": "redo"})
-    return "Redo applied"

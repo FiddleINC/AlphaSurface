@@ -6,9 +6,9 @@
 //   navigations        → network first, fall back to cached shell
 //   /assets/* (hashed) → cache first (immutable build output)
 //   icons/manifest     → stale-while-revalidate
-//   /api, /ws, /static → never cached (live AI traffic)
+//   /api, /ws          → never cached (live AI traffic)
 
-const VERSION = "v1"
+const VERSION = "v2"
 const SHELL_CACHE = `alphasurface-shell-${VERSION}`
 const ASSET_CACHE = `alphasurface-assets-${VERSION}`
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon.svg"]
@@ -33,7 +33,7 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return
   const url = new URL(req.url)
   if (url.origin !== self.location.origin) return
-  if (/^\/(api|ws|static)(\/|$)/.test(url.pathname)) return
+  if (/^\/(api|ws)(\/|$)/.test(url.pathname)) return
 
   if (req.mode === "navigate") {
     event.respondWith(

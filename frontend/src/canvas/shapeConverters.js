@@ -1,9 +1,7 @@
-// ── Shape converters — three-tier canvas context system ──────────────────────
+// ── Shape converters for the canvas snapshot ─────────────────────────────────
 // Adapted from tldraw agent-template shared/format/
-// Gives the AI spatially intelligent canvas understanding:
-//   BlurryShape      — shapes in viewport (lightweight: id, type, bounds, text)
-//   FocusedShape     — selected/context shapes (full detail: color, fill, etc.)
-//   PeripheralCluster — shapes outside viewport (grouped by proximity)
+//   BlurryShape  — shapes in viewport (lightweight: id, type, bounds, text)
+//   FocusedShape — selected/context shapes (full detail: color, fill, etc.)
 
 // ── Type mapping: tldraw geo types → focused type names ──────────────────────
 const GEO_TYPE_MAP = {
@@ -51,7 +49,7 @@ function getShapeText(editor, shape) {
   }
 }
 
-// ── TIER 1: BlurryShape ───────────────────────────────────────────────────────
+// ── BlurryShape ───────────────────────────────────────────────────────
 // Lightweight — used for all shapes visible in the agent's viewport
 // Model sees: position, size, type, text only. No color, no fill details.
 
@@ -70,7 +68,7 @@ export function convertToBlurryShape(editor, shape) {
   }
 }
 
-// ── TIER 2: FocusedShape ─────────────────────────────────────────────────────
+// ── FocusedShape ─────────────────────────────────────────────────────
 // Full detail — used for selected shapes and shapes given as explicit context
 // Model sees: all props including color, fill, text alignment, arrow bindings
 
@@ -174,73 +172,4 @@ export function convertToFocusedShape(editor, shape) {
         subType: shape.type,
       }
   }
-}
-
-// ── TIER 3: PeripheralCluster ─────────────────────────────────────────────────
-// Shapes outside the viewport are grouped into spatial clusters.
-// Model knows roughly how many shapes are off-screen and where, without
-// wasting tokens on individual shape details.
-
-export function convertToPeripheralClusters(editor, shapesOutsideViewport, padding = 75) {
-  if (shapesOutsideViewport.length === 0) return []
-
-  // Expand each shape's bounds by padding, then group overlapping ones
-  const expanded = shapesOutsideViewport.map(shape => {
-    const b = editor.getShapeMaskedPageBounds(shape)
-    if (!b) return null
-    return {
-      shape,
-      bounds: {
-        x: b.x - padding,
-        y: b.y - padding,
-        w: b.w + padding * 2,
-        h: b.h + padding * 2,
-      },
-    }
-  }).filter(Boolean)
-
-  const groups = []
-
-  for (const item of expanded) {
-    let landed = false
-    for (const group of groups) {
-      if (boundsIntersect(group.bounds, item.bounds)) {
-        group.count++
-        group.bounds = expandBounds(group.bounds, item.bounds)
-        landed = true
-        break
-      }
-    }
-    if (!landed) {
-      groups.push({ bounds: { ...item.bounds }, count: 1 })
-    }
-  }
-
-  // Shrink back by padding
-  return groups.map(g => ({
-    numberOfShapes: g.count,
-    bounds: {
-      x: Math.round(g.bounds.x + padding),
-      y: Math.round(g.bounds.y + padding),
-      w: Math.round(g.bounds.w - padding * 2),
-      h: Math.round(g.bounds.h - padding * 2),
-    },
-  }))
-}
-
-function boundsIntersect(a, b) {
-  return !(
-    a.x + a.w < b.x ||
-    b.x + b.w < a.x ||
-    a.y + a.h < b.y ||
-    b.y + b.h < a.y
-  )
-}
-
-function expandBounds(a, b) {
-  const x = Math.min(a.x, b.x)
-  const y = Math.min(a.y, b.y)
-  const x2 = Math.max(a.x + a.w, b.x + b.w)
-  const y2 = Math.max(a.y + a.h, b.y + b.h)
-  return { x, y, w: x2 - x, h: y2 - y }
 }

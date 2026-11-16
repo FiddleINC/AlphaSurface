@@ -35,21 +35,11 @@ from brain.canvas_agent import CanvasAgent  # noqa: E402
 from dispatcher import register_handler, run_dispatcher  # noqa: E402
 from ink.api import InkCoordinator, create_ink_router  # noqa: E402
 from sub_agents import find_empty_note_position  # noqa: E402
-from tools.snapshot import apply_snapshot  # noqa: E402
 from model_config import has_openai_credentials  # noqa: E402
+from tools.snapshot import apply_snapshot  # noqa: E402
 from voice.realtime import create_voice_router  # noqa: E402
 
 connected_clients: list[WebSocket] = []
-
-# Actions any client may relay to all clients (also what the agent emits).
-CANVAS_PASSTHROUGH_TYPES = {
-    "add_text", "add_note", "add_geo", "add_arrow", "bind_arrow", "add_bookmark",
-    "delete_shapes", "update_shape", "move_shape", "clear_canvas", "zoom_to_fit",
-    "focus_shape", "select_shapes", "align_shapes", "distribute_shapes", "resize_shape",
-    "create_frame", "group_shapes", "label_shape", "stack_shapes", "rotate_shapes",
-    "bring_to_front", "send_to_back", "set_viewport", "draw_freehand", "ink_tidy",
-    "add_research_card", "focus_artifact", "undo", "redo",
-}
 
 
 async def broadcast(message: dict):
@@ -174,9 +164,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "ai_status", "payload": {
                         "status": "disconnected", "detail": "Claude is not configured (ANTHROPIC_API_KEY)",
                     }}))
-
-            elif msg_type in CANVAS_PASSTHROUGH_TYPES:
-                await broadcast(message)
 
     except WebSocketDisconnect:
         pass

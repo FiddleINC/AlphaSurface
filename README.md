@@ -135,7 +135,7 @@ gcloud run deploy alphasurface-backend --source . --region us-central1 \
   --set-env-vars ANTHROPIC_API_KEY=...,OPENAI_API_KEY=...
 ```
 
-**Frontend** (any static host, e.g. Vercel): set `VITE_TLDRAW_LICENSE_KEY`, point the `/ws` and `/api` proxy in `frontend/vite.config.js` (or your host's rewrites) at the backend URL, then `npm run build` and deploy `dist/`. Serve it over HTTPS so the microphone works.
+**Frontend:** set `VITE_TLDRAW_LICENSE_KEY`, run `npm run build`, and serve `dist/` over HTTPS (the microphone needs it). The app calls the backend on its own origin at `/api/*` (HTTP) and `/ws` (WebSocket), so whatever serves `dist/` must forward both paths to the backend, including the WebSocket upgrade on `/ws`. A reverse proxy such as nginx or Caddy in front of both does this. The proxy in `frontend/vite.config.js` only applies to `npm run dev` and `npm run preview`, not to a static deploy. Some static hosts can rewrite `/api` but cannot forward WebSockets; on those, put the frontend behind a proxy that can.
 
 Use HTTPS in production and keep API keys on the backend only.
 
@@ -176,11 +176,11 @@ frontend/
 ## Development
 
 ```bash
-cd backend && uv run pytest     # 38 tests, all offline (fake Claude/OpenAI clients)
+cd backend && uv run pytest     # 46 tests, all offline (fake Claude/OpenAI clients)
 cd frontend && npx eslint src   # lint
 ```
 
-**Add a canvas tool:** write a function with type hints and a clear docstring in `backend/tools/`, then add it to `AGENT_TOOLS` in `tools/__init__.py`. Its schema is generated from the signature.
+**Add a canvas tool:** write a function with type hints and a clear docstring in `backend/tools/`, then add it to `AGENT_TOOLS` in `tools/__init__.py`. Its schema is generated from the signature. If it emits a new action type, handle that type in `frontend/src/canvas/canvasActions.js` (and add it to `PAYLOAD_ACTIONS` there). Send shape ids with the `shape:` prefix (`tools.state.full_id`); Claude sees them without it.
 
 ---
 

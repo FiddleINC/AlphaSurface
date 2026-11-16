@@ -14,21 +14,16 @@ handwriting recognition.
 import uuid
 
 from ink.geometry import VALID_MARKS, connector_points, mark_points, resolve_targets
+from .colors import normalize_color
+from .smart_write import _find_free_position, _register_local
 from .state import canvas_action_queue, canvas_state
 
 AI_INK_COLOR = "violet"
-
-_VALID_COLORS = {
-    "black", "grey", "light-violet", "violet", "blue", "light-blue",
-    "yellow", "orange", "green", "light-green", "light-red", "red",
-}
-_COLOR_ALIASES = {"gray": "grey", "purple": "violet"}
+MAX_INK_TEXT = 160
 
 
 def _color(color: str) -> str:
-    c = (color or AI_INK_COLOR).strip().lower().replace("_", "-")
-    c = _COLOR_ALIASES.get(c, c)
-    return c if c in _VALID_COLORS else AI_INK_COLOR
+    return normalize_color(color, AI_INK_COLOR)
 
 
 def _ink_meta(role: str, linked: list[str]) -> dict:
@@ -61,7 +56,7 @@ def _emit_stroke(points: list[dict], color: str, role: str, linked: list[str]) -
 def _not_found(target: str) -> str:
     return (
         f"Could not find '{target}' on the canvas. Use a shapeId from "
-        "list_canvas_shapes / get_viewport_context, a few words of the text, "
+        "the board summary or get_viewport_context, a few words of the text, "
         "or an explicit region 'x,y,w,h'."
     )
 
@@ -151,9 +146,9 @@ def ink_write(text: str, near: str = "", side: str = "right", color: str = "viol
     Use for answering a handwritten question or problem right next to it
     (e.g. the result of "12 x 8 =", a one-line hint, a correction).
     Keep it short — a few words or one line of math. For longer content use
-    add_note_to_canvas or a research card instead.
+    place_near (a sticky note) or dispatch_research instead.
 
-    text:  what to write (max ~80 characters, use \\n for a second line)
+    text:  what to write (at most 160 characters, use \\n for a second line)
     near:  what to write next to — shapeId(s), a few words of text, or
            "x,y,w,h". Leave empty to write in empty space in the viewport.
     side:  right | below | left | above
@@ -162,7 +157,7 @@ def ink_write(text: str, near: str = "", side: str = "right", color: str = "viol
     text = (text or "").strip()
     if not text:
         return "Nothing to write."
-    text = text[:160]
+    text = text[:MAX_INK_TEXT]
 
     matched, bounds = resolve_targets(near, canvas_state.get("shapes", [])) if near else ([], None)
     if near and bounds is None:
@@ -172,7 +167,6 @@ def ink_write(text: str, near: str = "", side: str = "right", color: str = "viol
     est_h = 44 * (text.count("\n") + 1)
 
     if bounds is None:
-        from .smart_write import _find_free_position
         vp = canvas_state.get("viewport", {"x": 0, "y": 0, "w": 1200, "h": 800})
         x, y = _find_free_position(int(vp["x"] + vp["w"] * 0.3), int(vp["y"] + vp["h"] * 0.3), est_w, est_h)
     else:
@@ -188,7 +182,6 @@ def ink_write(text: str, near: str = "", side: str = "right", color: str = "viol
             x, y = bounds["x"] + bounds["w"] + gap, bounds["y"] + max(0, bounds["h"] / 2 - est_h / 2)
 
     shape_id = f"shape:inkwrite_{uuid.uuid4().hex[:10]}"
-    from .smart_write import _register_local
     _register_local(int(x), int(y), est_w, est_h, shape_id)
     canvas_action_queue.put_nowait({
         "type": "add_text",
