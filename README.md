@@ -33,18 +33,63 @@ Forked from the open-source [AlphaSurface](https://github.com/adr1en360/AlphaSur
 
 ## How it works
 
-```
- you ⇄ OpenAI Realtime (speech-to-speech, WebRTC in the browser)
-             │ tool call: use_whiteboard("what's the answer to what I wrote?")
-             ▼
- browser ──WS voice_request──► backend ──► Claude CanvasAgent ──► canvas tools
-             ▲                                │   (ink_write, ink_mark, ink_connect,
-             └──────WS voice_result ◄─────────┘    tidy_ink, research, …)
-                    "It's 96." → spoken by the voice model
+```mermaid
+flowchart TB
+  user(["You: pencil, finger, voice"])
 
- pen strokes ─(pause)─► POST /api/ink/recognize ─► Claude (vision, structured output)
-                                                   └─ a question? → Claude answers in ink
+  subgraph browser["Browser: React + tldraw · frontend/"]
+    pen["Pen input + handwriting capture<br/>ink/penInput.js · ink/inkRecognition.js"]
+    board[("tldraw board<br/>stored locally in IndexedDB")]
+    dock["Ink dock: Tidy · Ask AI · Auto-answer<br/>components/InkToolbar.jsx · ink/inkTidy.js"]
+    voice["Voice agent with one tool, use_whiteboard<br/>voice/realtimeVoice.js"]
+    hub["WebSocket client, snapshots, canvas actions<br/>agent/AlphaSurfaceInner.jsx · canvas/"]
+  end
+
+  subgraph backend["Backend: FastAPI · backend/"]
+    inkapi["POST /api/ink/recognize<br/>ink/"]
+    voiceapi["POST /api/voice/session<br/>voice/realtime.py"]
+    ws["/ws hub + board state<br/>main.py · tools/state.py"]
+    agent["CanvasAgent: Claude tool loop<br/>brain/ · prompts/system.txt"]
+    tools["Canvas tools: ink_write, ink_mark, tidy_ink, …<br/>tools/"]
+    subs["Background sub-agents: research, deep analysis<br/>dispatcher.py · sub_agents/"]
+  end
+
+  subgraph ai["AI services"]
+    claude{{"Anthropic API · Claude<br/>vision, tool use, web search"}}
+    openai{{"OpenAI Realtime API<br/>speech-to-speech"}}
+  end
+
+  user -->|"writes, sketches"| pen
+  user <-->|"talks"| voice
+  pen --> board
+  dock -->|"Tidy"| board
+  board -->|"snapshot + screenshot"| hub
+  dock -->|"Ask AI"| hub
+  voice <-->|"use_whiteboard request / answer"| hub
+  hub -->|"draws AI ink and shapes"| board
+
+  pen -->|"stroke cluster image"| inkapi
+  voice -->|"needs a session key"| voiceapi
+  hub <-->|"WebSocket"| ws
+
+  inkapi -->|"handwritten question"| agent
+  ws -->|"voice request, Ask AI"| agent
+  agent --> tools
+  tools -->|"canvas actions"| ws
+  tools -->|"dispatch_research, dispatch_super_think"| subs
+  subs -->|"research card, analysis notes"| ws
+  agent -->|"one-sentence reply to speak"| ws
+
+  inkapi -->|"read handwriting"| claude
+  agent <--> claude
+  subs <--> claude
+  voiceapi -->|"10-minute client secret"| openai
+  voice <-->|"WebRTC audio"| openai
 ```
+
+**A voice request:** you ask out loud → the OpenAI Realtime voice calls `use_whiteboard` → the request goes over the WebSocket to the Claude CanvasAgent → Claude looks at the board, calls canvas tools (the browser draws the results) and returns one sentence → the voice says it.
+
+**Handwriting:** when you pause, nearby strokes are sent as one image to `/api/ink/recognize` → Claude transcribes them → if it's a question or unfinished problem, the CanvasAgent writes the answer next to it in ink.
 
 - **OpenAI Realtime** (`gpt-realtime-2.1`) is the voice: it hears you, talks back, handles interruptions and turn-taking. It can't see the board; for anything board-related it calls one tool, `use_whiteboard`, and says the answer it gets back.
 - **Claude** (`claude-opus-5-5` by default) is the brain: it gets each request with a board screenshot and a summary of the shapes (including transcribed handwriting), acts on the board through canvas tools, and returns a one-sentence answer. It also reads handwriting, does research with web search, and runs deep analysis. Requests use the server-side refusal fallback, so if Claude declines a request on policy grounds, a fallback model answers instead of returning nothing.
