@@ -13,6 +13,8 @@ Usage examples:
   - Draw a diagram outline
 """
 import uuid
+
+from .colors import normalize_color
 from .state import canvas_action_queue
 
 
@@ -26,7 +28,7 @@ def draw_freehand(
 
     points: comma-separated x,y pairs like "100,200,150,220,200,210"
             (every two numbers = one point: x1,y1,x2,y2,x3,y3...)
-    color:  stroke color — black | grey | blue | red | green | orange | violet | yellow
+    color:  stroke color — any tldraw color (black, grey, blue, red, green, orange, violet, …)
     closed: if True, the stroke closes back to the starting point (for shapes like circles)
 
     Returns the shape ID of the created stroke.
@@ -45,14 +47,7 @@ def draw_freehand(
     - For an underline: two points (start_x,y  end_x,y)
     - For a rough arrow: a few points along the shaft + two points for the arrowhead
     """
-    _VALID_COLORS = {
-        "black", "grey", "gray", "blue", "red", "green",
-        "orange", "violet", "yellow", "light-blue", "light-green",
-    }
-    _COLOR_MAP = {"gray": "grey", "purple": "violet"}
-    normalized_color = _COLOR_MAP.get(color.lower(), color.lower())
-    if normalized_color not in _VALID_COLORS:
-        normalized_color = "black"
+    normalized_color = normalize_color(color, "black")
 
     # Parse points string into list of {x, y} dicts
     try:

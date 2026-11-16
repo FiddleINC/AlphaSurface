@@ -28,7 +28,7 @@ const TOOL_TIMEOUT_MS = 60_000
 /**
  * Start a voice session.
  * @param {object} opts
- * @param {(msg: object) => void} opts.send   send a message to the backend WebSocket
+ * @param {(msg: object) => boolean} opts.send  send to the backend WebSocket; false if it is closed
  * @param {(state: string) => void} opts.onState  "listening" | "thinking" | "speaking" | "idle" | "off"
  * @param {(reason: string) => void} [opts.onDisconnect]  the call dropped after connecting
  * @returns {Promise<{resolve, speak, mute, setSpeakerMuted, close}>}
@@ -56,7 +56,11 @@ export async function startRealtimeVoice({ send, onState, onDisconnect }) {
       const id = crypto.randomUUID()
       pending.set(id, resolve)
       onState?.("thinking")
-      send({ type: "voice_request", payload: { id, request } })
+      // Backend unreachable: answer now instead of waiting for the tool timeout.
+      if (!send({ type: "voice_request", payload: { id, request } })) {
+        pending.delete(id)
+        resolve("The whiteboard AI isn't connected right now. Try again in a moment.")
+      }
     }),
   })
 

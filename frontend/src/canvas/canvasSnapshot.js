@@ -1,16 +1,13 @@
 // ── Canvas snapshot builder ───────────────────────────────────────────────────
-// Builds the three-tier snapshot sent to the Python backend via WebSocket.
-// Replaces the flat shape list from the old App.jsx canvas_snapshot.
-//
-// The Python backend feeds this into Claude's context so it understands
-// the canvas spatially — not just as a flat list of all shapes.
+// Builds the snapshot sent to the Python backend via WebSocket
+// (backend/tools/snapshot.py merges it into canvas_state):
+//   blurryShapes   every shape in the viewport (id, type, bounds, text);
+//                  recognized handwriting collapsed to one "ink" entry per cluster
+//   focusedShapes  selected and AI-placed shapes, with more detail
+// The backend feeds this into Claude's context with each turn.
 
-import {
-  convertToBlurryShape,
-  convertToFocusedShape,
-  convertToPeripheralClusters,
-} from "./shapeConverters"
-import { getRecognizedClusters, getBounds, isUserInk } from "../ink/inkModel"
+import { convertToBlurryShape, convertToFocusedShape } from "./shapeConverters"
+import { getRecognizedClusters, getBounds } from "../ink/inkModel"
 
 /**
  * Replace each recognized handwriting cluster with one "ink" entry that
@@ -38,15 +35,13 @@ function collapseInk(editor, blurryShapes) {
       type: "ink",
       x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h),
       text: ink.text || (ink.summary ? `[sketch] ${ink.summary}` : ""),
-      intent: ink.intent,
-      strokes: c.shapes.length,
     })
   }
   return out
 }
 
 /**
- * Build and send the three-tier canvas snapshot over WebSocket.
+ * Build and send the canvas snapshot over WebSocket.
  * Called periodically (every 3s) and immediately when shape count changes.
  *
  * @param {object} editor - tldraw editor instance
@@ -56,17 +51,10 @@ export function sendCanvasSnapshot(editor, ws) {
   if (!editor || !ws || ws.readyState !== WebSocket.OPEN) return
 
   const viewport = editor.getViewportPageBounds()
-  const currentPage = editor.getCurrentPage()
-  const currentPageId = currentPage.id
   const allShapes = editor.getCurrentPageShapes()
   const selectedIds = new Set(editor.getSelectedShapeIds())
-  const pages = editor.getPages().map(p => ({
-    id: p.id,
-    name: p.name,
-    shapeCount: editor.getPageShapeIds(p.id).size,
-  }))
 
-  // ── TIER 1: Blurry shapes (viewport shapes, lightweight) ─────────────────
+  // ── Blurry shapes (viewport shapes, lightweight) ─────────────────────────
   const shapesInViewport = allShapes.filter(shape => {
     const bounds = editor.getShapeMaskedPageBounds(shape)
     if (!bounds) return false
@@ -82,9 +70,8 @@ export function sendCanvasSnapshot(editor, ws) {
     editor,
     shapesInViewport.map(shape => convertToBlurryShape(editor, shape)).filter(Boolean),
   )
-  const unreadInk = shapesInViewport.filter(s => isUserInk(s) && !s.meta?.ink?.clusterId).length
 
-  // ── TIER 2: Focused shapes (selected shapes, full detail) ─────────────────
+  // ── Focused shapes (selected shapes, full detail) ─────────────────────────
   const selectedShapes = allShapes.filter(s => selectedIds.has(s.id))
   const focusedShapes = selectedShapes.map(shape => convertToFocusedShape(editor, shape))
 
@@ -99,40 +86,19 @@ export function sendCanvasSnapshot(editor, ws) {
 
   const allFocused = [...focusedShapes, ...agentFocused]
 
-  // ── TIER 3: Peripheral clusters (outside viewport, grouped) ───────────────
-  const shapesOutsideViewport = allShapes.filter(shape => {
-    const bounds = editor.getShapeMaskedPageBounds(shape)
-    if (!bounds) return false
-    return (
-      bounds.x + bounds.w < viewport.x ||
-      bounds.x > viewport.x + viewport.w ||
-      bounds.y + bounds.h < viewport.y ||
-      bounds.y > viewport.y + viewport.h
-    )
-  })
-
-  const peripheralClusters = convertToPeripheralClusters(editor, shapesOutsideViewport)
-
   // ── Build and send ────────────────────────────────────────────────────────
   ws.send(JSON.stringify({
     type: "canvas_snapshot",
     payload: {
-      // Three-tier context
       blurryShapes,
       focusedShapes: allFocused,
-      peripheralClusters,
 
       // Selection
       selectedShapeIds: [...selectedIds].map(id =>
         id.startsWith("shape:") ? id.slice(6) : id
       ),
 
-      // Page context
-      currentPageId,
-      currentPageName: currentPage.name,
-      pages,
       shape_count: allShapes.length,
-      unreadInkStrokes: unreadInk,
 
       // Viewport
       viewport: {

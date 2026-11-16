@@ -20,8 +20,9 @@ def dispatch_research(query: str) -> str:
 def dispatch_super_think() -> str:
     """
     Run a deep analysis of everything on the canvas (gaps, risks, next steps)
-    and place the result as a cluster of notes. Use when the user asks to
-    "super think", "deep dive", or "analyse the whole board". Takes ~30s.
+    and place the result as three columns of notes. Use when the user asks to
+    "super think", "deep dive", or "analyse the whole board". Takes up to a
+    minute; the notes appear by themselves, so do not wait for them.
     """
     dispatch("super_think", {}, source="canvas_agent")
     return "Deep analysis started"

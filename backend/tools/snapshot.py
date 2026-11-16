@@ -1,12 +1,8 @@
 """Apply a browser canvas snapshot to the shared canvas_state."""
 
-from .state import update_canvas_state
+from .state import canvas_state, full_id, update_canvas_state
 
 _DEFAULT_META = {"semanticRole": "unknown", "source": "unknown", "addedBy": "unknown", "confidence": 1.0, "linked_to": []}
-
-
-def _full_id(sid: str) -> str:
-    return sid if sid.startswith("shape:") else f"shape:{sid}"
 
 
 def shapes_from_snapshot(payload: dict) -> list[dict]:
@@ -22,7 +18,7 @@ def shapes_from_snapshot(payload: dict) -> list[dict]:
         sid = s.get("shapeId", "")
         if not sid:
             continue
-        fid = _full_id(sid)
+        fid = full_id(sid)
         shape_map[fid] = {
             "id": fid,
             "type": s.get("type", "unknown"),
@@ -37,7 +33,7 @@ def shapes_from_snapshot(payload: dict) -> list[dict]:
         sid = s.get("shapeId", "")
         if not sid:
             continue
-        fid = _full_id(sid)
+        fid = full_id(sid)
         existing = shape_map.get(fid, {})
         shape_map[fid] = {
             **existing,
@@ -55,17 +51,14 @@ def shapes_from_snapshot(payload: dict) -> list[dict]:
     return list(shape_map.values())
 
 
-def apply_snapshot(payload: dict) -> bool:
-    """Update canvas_state from a snapshot. Returns True if the shape set changed."""
+def apply_snapshot(payload: dict) -> None:
+    """Update canvas_state from a browser snapshot."""
     shapes = shapes_from_snapshot(payload)
-    return update_canvas_state(
+    update_canvas_state(
         shapes,
         payload.get("shape_count", len(shapes)),
         viewport=payload.get("viewport"),
         selected_shape_ids=payload.get("selectedShapeIds"),
-        current_page_id=payload.get("currentPageId"),
-        current_page_name=payload.get("currentPageName"),
-        pages=payload.get("pages"),
     )
 
 
@@ -77,11 +70,11 @@ def note_recognized_cluster(shape_ids: list[str], bounds: dict, text: str) -> st
     the browser's next snapshot arrives; without this, Claude would see the
     strokes as anonymous "draw" shapes (or not at all) and could not answer
     next to them. The next snapshot replaces this entry with the real one.
+    The browser sends the cluster's lead stroke first, so the id used here is
+    the same one later snapshots use.
     Returns the id used for the cluster.
     """
-    from .state import canvas_state
-
-    ids = [_full_id(i) for i in shape_ids if i]
+    ids = [full_id(i) for i in shape_ids if i]
     if not ids:
         return None
     members = set(ids)

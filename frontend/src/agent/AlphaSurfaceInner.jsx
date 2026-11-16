@@ -32,9 +32,12 @@ export function AlphaSurfaceInner({ config }) {
   const voiceRef = useRef(null)
   const prevShapeCount = useRef(0)
 
+  /** Send to the backend; returns false when the socket is not open. */
   const sendMessage = (msg) => {
     const socket = wsRef.current
-    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg))
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false
+    socket.send(JSON.stringify(msg))
+    return true
   }
 
   // ── WebSocket connection ──────────────────────────────────────────────────
@@ -72,9 +75,6 @@ export function AlphaSurfaceInner({ config }) {
             // Replies to voice requests are spoken by the voice tool call itself;
             // speak the others (Ask AI, auto-answer) if voice is on.
             if (p.source !== "voice") voiceRef.current?.speak(p.text)
-            return
-          case "config_ack":
-          case "canvas_snapshot":
             return
           default:
             setIndicator(true)

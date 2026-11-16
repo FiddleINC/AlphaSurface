@@ -1,45 +1,35 @@
 """
 AlphaSurface — SuperThinkAgent
 
-A deep canvas analysis sub-agent. Triggered when the user explicitly says something
-like "super think", "deep dive", "analyze this", or "think harder".
+A deep canvas analysis sub-agent. Triggered when the canvas agent calls
+dispatch_super_think() ("super think", "deep dive", "analyse everything").
 
 Flow:
   1. Reads all text from the canvas (via the canvas_state snapshot)
   2. Sends it to Claude at high effort
-  3. Places 3 tiers of output on canvas:
-       - 🟣 Core insight cluster (synthesis of what's on canvas)
-       - 🔴 Tensions / contradictions found
-       - 🟡 Open questions / white-space (what's missing)
-  4. Zoom to fit
+  3. Places three columns of notes in empty space in the viewport:
+       - Synthesis (violet)
+       - Tensions / contradictions (red)
+       - Open questions (yellow)
+  4. Focuses the viewport on the result
 
 Model: Claude (CLAUDE_MODEL, effort ALPHASURFACE_SUPER_THINK_EFFORT)
 """
 
 import asyncio
-import random
+import traceback
+import uuid
 from typing import Optional
 
 from brain.claude import get_client, request_defaults, text_of
 from model_config import CLAUDE_MODEL, CLAUDE_SUPER_THINK_EFFORT
-from sub_agents import emit_failure_note
-
-# ── Config ────────────────────────────────────────────────────────────────────
+from sub_agents import emit_failure_note, find_empty_area
 
 _MODEL = CLAUDE_MODEL
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_shape_id(prefix: str) -> str:
-    import uuid
-    return f"{prefix}_{uuid.uuid4().hex[:8]}"
-
-
-def _canvas_pos():
-    """Return a base position offset from canvas center with slight randomness."""
-    bx = random.randint(-800, -200)
-    by = random.randint(-400, 300)
-    return bx, by
+    return f"shape:{prefix}_{uuid.uuid4().hex[:8]}"
 
 
 # ── Deep analysis prompt ──────────────────────────────────────────────────────
@@ -121,17 +111,20 @@ _SECTION_LABELS = {
 
 
 async def _place_super_think(broadcast_fn, sections: dict[str, list[str]]):
-    """Place three analysis clusters vertically on canvas."""
-    bx, by = _canvas_pos()
+    """Place up to three columns (header + notes) in empty space in the viewport."""
     col_gap = 420
-    note_h = 120
     note_w = 380
-    note_spacing = 140
+    note_spacing = 240  # tldraw notes are 200 tall at size "m"
+    columns = [(key, bullets[:3]) for key, bullets in sections.items() if bullets]
+    if not columns:
+        return
+    total_w = col_gap * (len(columns) - 1) + note_w
+    total_h = 32 + 70 + note_spacing * max(len(b) for _, b in columns)
+    bx, top = find_empty_area(total_w, total_h, step=(total_w + 80, total_h + 80), pad=48)
+    by = top + 32  # room for the attribution line
+    placed: list[str] = []
 
-    for col, (key, bullets) in enumerate(sections.items()):
-        if not bullets:
-            continue
-
+    for col, (key, bullets) in enumerate(columns):
         cx = bx + col * col_gap
         cy = by
 
@@ -151,10 +144,11 @@ async def _place_super_think(broadcast_fn, sections: dict[str, list[str]]):
                 "geo": "rectangle",
             }
         })
+        placed.append(header_id)
         await asyncio.sleep(0.1)
 
         # Bullet notes below header
-        for i, bullet in enumerate(bullets[:3]):
+        for i, bullet in enumerate(bullets):
             note_id = _make_shape_id(f"st_{key}_{i}")
             await broadcast_fn({
                 "type": "add_note",
@@ -166,6 +160,7 @@ async def _place_super_think(broadcast_fn, sections: dict[str, list[str]]):
                     "color": _SECTION_COLORS[key],
                 }
             })
+            placed.append(note_id)
             await asyncio.sleep(0.08)
 
     # Attribution
@@ -181,8 +176,12 @@ async def _place_super_think(broadcast_fn, sections: dict[str, list[str]]):
             "color": "violet",
         }
     })
+    placed.append(stamp_id)
     await asyncio.sleep(0.05)
-
+    await broadcast_fn({
+        "type": "focus_artifact",
+        "payload": {"shapeIds": placed, "primaryShapeId": placed[0], "reason": "super_think_ready"},
+    })
 
 
 # ── Canvas text extractor ─────────────────────────────────────────────────────
@@ -217,7 +216,7 @@ def _extract_canvas_text(canvas_state: dict) -> str:
 
 async def run_super_think(payload: dict, broadcast_fn, canvas_state: dict) -> None:
     """
-    Main handler. Called by dispatcher with payload = {'trigger': str}.
+    Main handler. Called by the dispatcher with an empty payload.
     canvas_state: the live canvas state dict from tools.canvas_state.
     """
     print("[SuperThink] Starting deep analysis...")
@@ -243,16 +242,14 @@ async def run_super_think(payload: dict, broadcast_fn, canvas_state: dict) -> No
 
         if total_bullets == 0:
             print("[SuperThink] No structured output parsed — skipping canvas placement.")
+            await emit_failure_note(broadcast_fn, "SuperThinkAgent", "no analysis parsed")
             return
 
         await _place_super_think(broadcast_fn, sections)
         print(f"[SuperThink] Complete — {total_bullets} insights placed on canvas.")
 
     except Exception as e:
-        print(f"[SuperThink] Error: {e}")
-        msg = str(e)
-        is_rate_limited = "429" in msg or "RESOURCE_EXHAUSTED" in msg
-        if not is_rate_limited:
-            import traceback
+        print(f"[SuperThink] Error: {e!r}")
+        if "429" not in str(e):
             traceback.print_exc()
         await emit_failure_note(broadcast_fn, "SuperThinkAgent", e)

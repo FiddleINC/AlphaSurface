@@ -12,6 +12,4 @@ frontend/dist/
 .env
 *.env
 
-Gemini.md
 info.txt
-backend/alphasurface_memory.db

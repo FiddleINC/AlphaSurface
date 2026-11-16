@@ -71,17 +71,30 @@ function nearbyContext(editor, bounds) {
     .slice(0, 600)
 }
 
+/**
+ * The stroke that stores the cluster's result: the previous lead if there is
+ * one (so references stay valid across re-recognition), else the top-left one.
+ */
+function pickLead(editor, strokes) {
+  return strokes.find(s => s.meta?.ink?.lead) ?? [...strokes].sort((a, b) => {
+    const ba = editor.getShapePageBounds(a), bb = editor.getShapePageBounds(b)
+    return (ba.y - bb.y) || (ba.x - bb.x)
+  })[0]
+}
+
 async function recognizeCluster(editor, strokes) {
   const rendered = await renderShapes(editor, strokes)
   if (!rendered) return null
   const bounds = getBounds(editor, strokes)
+  const lead = pickLead(editor, strokes)
 
   const res = await fetch("/api/ink/recognize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...rendered,
-      shapeIds: strokes.map(s => s.id),
+      // Lead first: the backend names the cluster after the first id.
+      shapeIds: [lead.id, ...strokes.filter(s => s !== lead).map(s => s.id)],
       context: nearbyContext(editor, bounds),
       autoRespond: getInkState().autoRespond,
     }),
@@ -95,13 +108,8 @@ async function recognizeCluster(editor, strokes) {
 }
 
 function writeResult(editor, strokes, result, bounds) {
-  // Keep the lead stable across re-recognition so references stay valid.
-  const previousLead = strokes.find(s => s.meta?.ink?.lead)
-  const lead = previousLead ?? [...strokes].sort((a, b) => {
-    const ba = editor.getShapePageBounds(a), bb = editor.getShapePageBounds(b)
-    return (ba.y - bb.y) || (ba.x - bb.x)
-  })[0]
-  const clusterId = previousLead?.meta?.ink?.clusterId ?? createShapeId().slice(6)
+  const lead = pickLead(editor, strokes)
+  const clusterId = (lead.meta?.ink?.lead && lead.meta.ink.clusterId) || createShapeId().slice(6)
   const at = Date.now()
 
   editor.run(() => {

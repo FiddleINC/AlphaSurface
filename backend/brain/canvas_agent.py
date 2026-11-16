@@ -49,6 +49,11 @@ class Turn:
     reply_id: Optional[str] = None  # correlates a voice request with its answer
 
 
+def _short_id(shape_id) -> str:
+    sid = str(shape_id)
+    return sid[6:] if sid.startswith("shape:") else sid
+
+
 def board_summary(state: dict = canvas_state) -> str:
     """Compact JSON of what is on screen, for the start of each turn."""
     vp = state.get("viewport", {})
@@ -56,9 +61,8 @@ def board_summary(state: dict = canvas_state) -> str:
     for s in state.get("shapes", [])[:MAX_SUMMARY_SHAPES]:
         if not isinstance(s, dict):
             continue
-        sid = str(s.get("id", ""))
         item = {
-            "id": sid[6:] if sid.startswith("shape:") else sid,
+            "id": _short_id(s.get("id", "")),
             "type": s.get("type", "?"),
             "x": round(s.get("x", 0)), "y": round(s.get("y", 0)),
             "w": round(s.get("w", 0)), "h": round(s.get("h", 0)),
@@ -68,7 +72,7 @@ def board_summary(state: dict = canvas_state) -> str:
         shapes.append(item)
     return json.dumps({
         "viewport": {k: round(vp.get(k, 0)) for k in ("x", "y", "w", "h")},
-        "selected": state.get("selected_shape_ids", [])[:20],
+        "selected": [_short_id(i) for i in state.get("selected_shape_ids", [])[:20]],
         "shapes": shapes,
     }, separators=(",", ":"))
 
